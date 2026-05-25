@@ -1,16 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   BookOpen, Brain, Edit3, User, Sun, Moon,
-  Plus, Trash2, Download, Upload, ChevronLeft,
+  Trash2, Download, Upload, ChevronLeft,
   BarChart2, BookMarked, CheckCircle, Circle, Clock,
-  X, FileText, Target, Award
+  X, FileText, Target, Award, Key
 } from 'lucide-react';
-
-declare global {
-  interface Window {
-    claude: { complete: (prompt: string) => Promise<string> };
-  }
-}
 
 // ─── Types ────────────────────────────────────────────────
 type Mode = 'flashcards' | 'quiz' | 'brain_dump' | 'feynman';
@@ -151,6 +145,30 @@ const pFeynman = (topic: string, resp: string, pid: string, r: string) => {
   return `Evaluate explanation of "${topic}" for: ${p.name} (${p.description}).${r}\nStudent wrote: "${resp}"\nRespond with valid JSON only, no markdown:\n{"clarityScore":80,"accuracyScore":85,"completenessScore":70,"overallScore":78,"audienceFit":"did they pitch correctly?","feedback":"overall","suggestions":["suggestion 1"]}`;
 };
 
+// ─── API ──────────────────────────────────────────────────
+const callClaudeAPI = async (key: string, prompt: string): Promise<string> => {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'anthropic-dangerous-allow-browser': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error?.message || `API error ${res.status}`);
+  }
+  const json = await res.json();
+  return json.content[0].text;
+};
+
 // ─── UI Primitives ────────────────────────────────────────
 function Btn({ children, onClick, disabled = false, variant = 'primary', accent, sm }: {
   children: React.ReactNode; onClick?: () => void; disabled?: boolean;
@@ -225,6 +243,9 @@ export default function RefreisherApp() {
   const [view, setView]         = useState<StudyView>('home');
   const [busy, setBusy]         = useState(false);
   const [err, setErr]           = useState<string | null>(null);
+  const [apiKey, setApiKey]     = useState(() => localStorage.getItem('anthropic_api_key') || '');
+  const [keyInput, setKeyInput] = useState('');
+  const [showKey, setShowKey]   = useState(false);
 
   // Setup
   const [topic, setTopic]       = useState('');
@@ -277,6 +298,18 @@ export default function RefreisherApp() {
   const ma   = mode  ? MODE_CONFIG[mode].accent  : C.accent;
   const sa   = sesh  ? MODE_CONFIG[sesh.mode].accent : C.accent;
   const diag = (a = C.accent) => ({ backgroundImage: `repeating-linear-gradient(45deg,transparent,transparent 38px,${a}07 38px,${a}07 39px)` });
+
+  // ─── API + key ───
+  const call = (prompt: string) => callClaudeAPI(apiKey, prompt);
+
+  const saveKey = () => {
+    const k = keyInput.trim();
+    if (!k) return;
+    localStorage.setItem('anthropic_api_key', k);
+    setApiKey(k);
+    setKeyInput('');
+    setShowKey(false);
+  };
 
   // ─── Data ops ───
   const upd = (fn: (d: AppData) => AppData) => setData(p => fn(p));
@@ -370,7 +403,7 @@ export default function RefreisherApp() {
     if (!resp.trim() || !sesh) return;
     setBusy(true); setTon(false);
     try {
-      const raw = await window.claude.complete(pBrain(sesh.topic, resp, rag(sesh.ragFileId, data.ragFiles)));
+      const raw = await call(pBrain(sesh.topic, resp, rag(sesh.ragFileId, data.ragFiles)));
       const fb = parseAI(raw); setFbk(fb);
       patch(sesh.items[0].id, { userResponse: resp, aiFeedback: JSON.stringify(fb), aiScore: fb.score });
     } catch { setErr('Evaluation failed — please try again.'); }
@@ -381,7 +414,7 @@ export default function RefreisherApp() {
     if (!resp.trim() || !sesh) return;
     setBusy(true);
     try {
-      const raw = await window.claude.complete(pFeynman(sesh.topic, resp, persona, rag(sesh.ragFileId, data.ragFiles)));
+      const raw = await call(pFeynman(sesh.topic, resp, persona, rag(sesh.ragFileId, data.ragFiles)));
       const fb = parseAI(raw); setFbk(fb);
       patch(sesh.items[0].id, {
         userResponse: resp, persona, aiFeedback: JSON.stringify(fb), aiScore: fb.overallScore,
@@ -413,10 +446,10 @@ export default function RefreisherApp() {
     try {
       let items: StudyItem[] = [];
       if (mode === 'flashcards') {
-        const d = parseAI(await window.claude.complete(pFlash(topic, diff, len, r)));
+        const d = parseAI(await call(pFlash(topic, diff, len, r)));
         items = (d.flashcards||[]).map((f: any) => ({ id: uid(), front: f.front, back: f.back, _syncMeta: { synced: false } }));
       } else if (mode === 'quiz') {
-        const d = parseAI(await window.claude.complete(pQuiz(topic, diff, len, r)));
+        const d = parseAI(await call(pQuiz(topic, diff, len, r)));
         items = (d.questions||[]).map((q: any) => ({ id: uid(), question: q.question, options: q.options, correctIndex: q.correctIndex, explanation: q.explanation, _syncMeta: { synced: false } }));
       } else {
         items = [{ id: uid(), _syncMeta: { synced: false } }];
@@ -1017,6 +1050,10 @@ export default function RefreisherApp() {
           <span style={{ color: C.accent }}>Re</span>freisher
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button onClick={() => { setKeyInput(''); setShowKey(true); }} title={apiKey ? 'Change API key' : 'Set API key'}
+            style={{ background: 'none', border: `1px solid ${apiKey ? bdr : C.highlight}`, color: apiKey ? muted : C.highlight, padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}>
+            <Key size={13} />
+          </button>
           <button onClick={exportAll} title="Export" style={{ background: 'none', border: `1px solid ${bdr}`, color: muted, padding: '5px 10px', borderRadius: '4px 1px 4px 1px', cursor: 'pointer' }}><Download size={13} /></button>
           <button onClick={() => importRef.current?.click()} title="Import" style={{ background: 'none', border: `1px solid ${bdr}`, color: muted, padding: '5px 10px', borderRadius: '1px 4px 1px 4px', cursor: 'pointer' }}><Upload size={13} /></button>
           <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }} onChange={importAll} />
@@ -1054,6 +1091,38 @@ export default function RefreisherApp() {
         {tab === 'library' && <Library />}
         {tab === 'stats'   && <Stats />}
       </div>
+
+      {/* API key modal */}
+      {(showKey || !apiKey) && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '0 20px' }}>
+          <Box dark={dark} style={{ maxWidth: 420, width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{apiKey ? 'Update API Key' : 'Anthropic API Key required'}</div>
+              {apiKey && <button onClick={() => setShowKey(false)} style={{ background: 'none', border: 'none', color: muted, cursor: 'pointer' }}><X size={16} /></button>}
+            </div>
+            <div style={{ fontSize: 13, color: muted, marginBottom: 16, lineHeight: 1.6 }}>
+              Your key is stored only in your browser's localStorage and sent directly to Anthropic — never to any other server.
+            </div>
+            <input
+              type="password"
+              value={keyInput}
+              onChange={e => setKeyInput(e.target.value)}
+              placeholder="sk-ant-api03-…"
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && saveKey()}
+              style={{ width: '100%', background: 'transparent', border: `1px solid ${bdr}`, borderRadius: '8px 2px 8px 2px', padding: '10px 14px', color: fg, fontSize: 14, outline: 'none', boxSizing: 'border-box', marginBottom: 14 }}
+              onFocus={e => e.currentTarget.style.borderColor = C.accent}
+              onBlur={e => e.currentTarget.style.borderColor = bdr}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: C.accent, textDecoration: 'none' }}>
+                Get a key →
+              </a>
+              <Btn onClick={saveKey} disabled={!keyInput.trim()}>Save Key</Btn>
+            </div>
+          </Box>
+        </div>
+      )}
     </div>
   );
 }
