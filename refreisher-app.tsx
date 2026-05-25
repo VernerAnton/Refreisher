@@ -238,7 +238,7 @@ function Pill({ label, value, accent }: { label: string; value: number | string;
 // ─── Main App ─────────────────────────────────────────────
 export default function RefreisherApp() {
   const [data, setData]         = useState<AppData>(loadData);
-  const [dark, setDark]         = useState(true);
+  const [dark, setDark]         = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [tab, setTab]           = useState<Tab>('study');
   const [view, setView]         = useState<StudyView>('home');
   const [busy, setBusy]         = useState(false);
