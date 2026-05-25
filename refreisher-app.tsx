@@ -245,7 +245,7 @@ export default function RefreisherApp() {
   const [err, setErr]           = useState<string | null>(null);
   const [apiKey, setApiKey]     = useState(() => localStorage.getItem('anthropic_api_key') || '');
   const [keyInput, setKeyInput] = useState('');
-  const [showKey, setShowKey]   = useState(false);
+  const [showKey, setShowKey]   = useState(() => !localStorage.getItem('anthropic_api_key'));
 
   // Setup
   const [topic, setTopic]       = useState('');
@@ -1093,12 +1093,12 @@ export default function RefreisherApp() {
       </div>
 
       {/* API key modal */}
-      {(showKey || !apiKey) && (
+      {showKey && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '0 20px' }}>
           <Box dark={dark} style={{ maxWidth: 420, width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>{apiKey ? 'Update API Key' : 'Anthropic API Key required'}</div>
-              {apiKey && <button onClick={() => setShowKey(false)} style={{ background: 'none', border: 'none', color: muted, cursor: 'pointer' }}><X size={16} /></button>}
+              <button onClick={() => setShowKey(false)} style={{ background: 'none', border: 'none', color: muted, cursor: 'pointer' }}><X size={16} /></button>
             </div>
             <div style={{ fontSize: 13, color: muted, marginBottom: 16, lineHeight: 1.6 }}>
               Your key is stored only in your browser's localStorage and sent directly to Anthropic — never to any other server.
