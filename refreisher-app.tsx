@@ -12,7 +12,7 @@ type Difficulty = 'beginner' | 'intermediate' | 'advanced';
 type Status     = 'not_started' | 'in_progress' | 'completed';
 type Rating     = 'easy' | 'medium' | 'hard';
 type Tab        = 'study' | 'library' | 'sources' | 'stats';
-type StudyView  = 'home' | 'source' | 'setup' | 'session' | 'complete';
+type StudyView  = 'home' | 'setup' | 'session' | 'complete';
 
 interface StudyItem {
   id: string;
@@ -31,6 +31,7 @@ interface Session {
   sessionLength: number; status: Status; score?: number; maxScore?: number; notes: string;
   sourceId?: string;
   ragFileId?: string; // legacy compat
+  model?: string;
   items: StudyItem[];
   createdAt: string; completedAt?: string; updatedAt: string;
   _syncMeta?: { synced: boolean; syncedAt?: string };
@@ -65,11 +66,31 @@ const PERSONAS = [
   { id: 'professor',name: 'Domain expert',      description: 'Precise terminology, full depth' },
 ];
 
-const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.ReactNode; description: string }> = {
-  flashcards: { label: 'Flashcards', accent: '#FF6B89', icon: <BookOpen size={20} />, description: 'Flip cards to test recall' },
-  quiz:        { label: 'Quiz',       accent: '#FF002C', icon: <Brain size={20} />,    description: 'Multiple-choice with immediate feedback' },
-  brain_dump:  { label: 'Brain Dump', accent: '#C97B9E', icon: <Edit3 size={20} />,    description: 'Timed free recall — write everything you know' },
-  feynman:     { label: 'Feynman',    accent: '#FF8C69', icon: <User size={20} />,     description: 'Explain the concept to an audience' },
+const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.ReactNode; description: string; tier: 'gen' | 'eval'; modelHint: string }> = {
+  flashcards: {
+    label: 'Flashcards', accent: '#FF6B89', icon: <BookOpen size={20} />,
+    description: 'Flip cards to test recall',
+    tier: 'gen',
+    modelHint: 'Pure JSON generation — any fast model handles this perfectly. Best place to save cost.',
+  },
+  quiz: {
+    label: 'Quiz', accent: '#FF002C', icon: <Brain size={20} />,
+    description: 'Multiple-choice with immediate feedback',
+    tier: 'gen',
+    modelHint: 'Needs coherent distractors — a mid-tier model reduces nonsensical wrong answers.',
+  },
+  brain_dump: {
+    label: 'Brain Dump', accent: '#C97B9E', icon: <Edit3 size={20} />,
+    description: 'Timed free recall — write everything you know',
+    tier: 'eval',
+    modelHint: 'Has to read your response against the source and score it honestly. A stronger model gives meaningfully better feedback.',
+  },
+  feynman: {
+    label: 'Feynman', accent: '#FF8C69', icon: <User size={20} />,
+    description: 'Explain the concept to an audience',
+    tier: 'eval',
+    modelHint: 'Most demanding — judges clarity, accuracy, and audience fit, then suggests concrete rewrites. Worth upgrading here.',
+  },
 };
 
 const GENERATION_MODELS = [
@@ -89,6 +110,17 @@ const EVALUATION_MODELS = [
 ];
 
 const RESEARCH_MODEL = 'perplexity/sonar-deep-research';
+
+const ALL_MODELS = [
+  { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B',       note: 'free · smallest' },
+  { id: 'google/gemini-flash-1.5-8b',            name: 'Gemini Flash 1.5 8B', note: 'ultra cheap' },
+  { id: 'google/gemini-2.0-flash-001',           name: 'Gemini 2.0 Flash',    note: 'fast · cheap' },
+  { id: 'openai/gpt-4o-mini',                    name: 'GPT-4o Mini',         note: 'fast · cheap' },
+  { id: 'anthropic/claude-haiku-4-5-20251001',   name: 'Claude Haiku 4.5',    note: 'fast · cheap' },
+  { id: 'anthropic/claude-sonnet-4-6',           name: 'Claude Sonnet 4.6',   note: 'balanced' },
+  { id: 'openai/gpt-4o',                         name: 'GPT-4o',              note: 'strong' },
+  { id: 'google/gemini-2.5-pro-preview',         name: 'Gemini 2.5 Pro',      note: 'strongest' },
+];
 
 const C = {
   bgDark: '#0D1628', bgLight: '#FFF0F3',
@@ -402,6 +434,7 @@ export default function RefreisherApp() {
   // Setup
   const [topic, setTopic]       = useState('');
   const [mode, setMode]         = useState<Mode | null>(null);
+  const [sessionModel, setSessionModel] = useState(genModel);
   const [diff, setDiff]         = useState<Difficulty>('intermediate');
   const [len, setLen]           = useState(10);
   const [deckId, setDeckId]     = useState('');
@@ -460,9 +493,7 @@ export default function RefreisherApp() {
   const diag   = (a = C.accent) => ({ backgroundImage: `repeating-linear-gradient(45deg,transparent,transparent 38px,${a}07 38px,${a}07 39px)` });
 
   // ─── API wrappers ───
-  const gen      = (prompt: string, system?: string) => callOpenRouter(apiKey, genModel,       prompt, system);
-  const eval_    = (prompt: string, system?: string) => callOpenRouter(apiKey, evalModel,      prompt, system);
-  const research = (prompt: string)                  => callOpenRouter(apiKey, RESEARCH_MODEL, prompt);
+  const research = (prompt: string) => callOpenRouter(apiKey, RESEARCH_MODEL, prompt);
 
   // ─── Settings ───
   const saveKey = () => {
@@ -585,7 +616,8 @@ export default function RefreisherApp() {
     if (!resp.trim() || !sesh) return;
     setBusy(true); setTon(false);
     try {
-      const fb = parseAI(await eval_(pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources)), SYS_BRAIN));
+      const m = sesh.model || evalModel;
+      const fb = parseAI(await callOpenRouter(apiKey, m, pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources)), SYS_BRAIN));
       setFbk(fb);
       patch(sesh.items[0].id, { userResponse: resp, aiFeedback: JSON.stringify(fb), aiScore: fb.score });
     } catch { setErr('Evaluation failed — please try again.'); }
@@ -596,7 +628,8 @@ export default function RefreisherApp() {
     if (!resp.trim() || !sesh) return;
     setBusy(true);
     try {
-      const fb = parseAI(await eval_(pFeynman(sesh.topic, resp, persona, ragCtx(sesh.sourceId, data.sources)), SYS_FEYNMAN));
+      const m = sesh.model || evalModel;
+      const fb = parseAI(await callOpenRouter(apiKey, m, pFeynman(sesh.topic, resp, persona, ragCtx(sesh.sourceId, data.sources)), SYS_FEYNMAN));
       setFbk(fb);
       patch(sesh.items[0].id, {
         userResponse: resp, persona, aiFeedback: JSON.stringify(fb), aiScore: fb.overallScore,
@@ -625,20 +658,21 @@ export default function RefreisherApp() {
     let did = deckId || mkDeck(topic);
     if (!deckId) setDeckId(did);
     const r = ragCtx(sourceId, data.sources);
+    const call = (prompt: string, sys: string) => callOpenRouter(apiKey, sessionModel, prompt, sys);
     try {
       let items: StudyItem[] = [];
       if (mode === 'flashcards') {
-        const d = parseAI(await gen(pFlash(topic, diff, len, r), SYS_FLASH));
+        const d = parseAI(await call(pFlash(topic, diff, len, r), SYS_FLASH));
         items = (d.flashcards||[]).map((f: any) => ({ id:uid(), front:f.front, back:f.back, _syncMeta:{synced:false} }));
       } else if (mode === 'quiz') {
-        const d = parseAI(await gen(pQuiz(topic, diff, len, r), SYS_QUIZ));
+        const d = parseAI(await call(pQuiz(topic, diff, len, r), SYS_QUIZ));
         items = (d.questions||[]).map((q: any) => ({ id:uid(), question:q.question, options:q.options, correctIndex:q.correctIndex, explanation:q.explanation, _syncMeta:{synced:false} }));
       } else {
         items = [{ id:uid(), _syncMeta:{synced:false} }];
       }
       const s: Session = {
         id:uid(), deckId:did, topic, mode, difficulty:diff, sessionLength:len,
-        status:'in_progress', notes:'', sourceId, items,
+        status:'in_progress', notes:'', sourceId, model:sessionModel, items,
         createdAt:ts(), updatedAt:ts(), _syncMeta:{synced:false},
       };
       upd(d => ({ ...d, sessions:[...d.sessions, s], subjectHistory:[topic, ...d.subjectHistory.filter(h=>h!==topic)].slice(0,10) }));
@@ -736,7 +770,7 @@ export default function RefreisherApp() {
           return (
             <Box key={m} dark={dark} accent={can ? cfg.accent : undefined}
               style={{ cursor:can?'pointer':'not-allowed', opacity:can?1:0.45, transition:'opacity 0.15s' }}
-              onClick={() => can && (setMode(m), setView('source'), setErr(null))}>
+              onClick={() => { if (!can) return; setMode(m); setSessionModel(MODE_CONFIG[m].tier === 'gen' ? genModel : evalModel); setView('setup'); setErr(null); setShowResearch(false); }}>
               <div style={{ color:cfg.accent, marginBottom:8 }}>{cfg.icon}</div>
               <div style={{ fontWeight:700, fontSize:15, marginBottom:3 }}>{cfg.label}</div>
               <div style={{ fontSize:12, color:muted }}>{cfg.description}</div>
@@ -748,23 +782,27 @@ export default function RefreisherApp() {
     </div>
   );
 
-  const SourceView = () => {
+  const Setup = () => {
     if (!mode) return null;
     const cfg = MODE_CONFIG[mode];
     const sel = sourceId ? data.sources.find(s => s.id === sourceId) : null;
     return (
       <div style={{ maxWidth:560, margin:'0 auto', padding:'0 16px' }}>
-        <button onClick={() => { setView('home'); setMode(null); }} style={{ background:'none', border:'none', color:muted, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, marginBottom:20 }}>
+        <button onClick={() => { setView('home'); setMode(null); setShowResearch(false); }}
+          style={{ background:'none', border:'none', color:muted, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, marginBottom:20 }}>
           <ChevronLeft size={14} /> Back
         </button>
+
+        {/* Mode header */}
         <Box dark={dark} accent={cfg.accent} style={{ marginBottom:14 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, color:cfg.accent, marginBottom:3 }}>{cfg.icon}<span style={{ fontWeight:700, fontSize:16 }}>{cfg.label}</span></div>
           <div style={{ fontSize:13, color:muted }}>{topic}</div>
         </Box>
 
-        <Box dark={dark} style={{ marginBottom:14 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Choose a Source</div>
-          <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+        {/* Source */}
+        <Box dark={dark} style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Source</div>
+          <div style={{ display:'flex', gap:8, marginBottom:sel ? 10 : 0 }}>
             <select value={sourceId||''} onChange={e => setSourceId(e.target.value || undefined)}
               style={{ flex:1, background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'6px 2px 6px 2px', padding:'8px 10px', fontSize:13, outline:'none' }}>
               <option value="">Select a source…</option>
@@ -773,56 +811,32 @@ export default function RefreisherApp() {
             <Btn sm variant="outline" accent={cfg.accent} onClick={() => fileRef.current?.click()}>Upload</Btn>
             <input ref={fileRef} type="file" accept=".txt,.md,text/plain,text/markdown" style={{ display:'none' }} onChange={uploadFile} />
           </div>
-
           {sel && (
-            <div style={{ padding:'10px 12px', background:`${cfg.accent}10`, borderRadius:'6px 2px 6px 2px', marginBottom:10 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+            <div style={{ padding:'9px 12px', background:`${cfg.accent}10`, borderRadius:'6px 2px 6px 2px', marginBottom:10 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
                 <span style={{ fontWeight:700, fontSize:13 }}>{sel.name}</span>
                 <span style={{ fontSize:10, fontWeight:700, background:sel.origin==='perplexity'?`${C.amber}20`:`${C.accent}20`, color:sel.origin==='perplexity'?C.amber:C.accent, padding:'2px 6px', borderRadius:'3px' }}>
                   {sel.origin==='perplexity' ? 'Perplexity' : 'Upload'}
                 </span>
                 <span style={{ fontSize:11, color:muted }}>{wc(sel.content).toLocaleString()} words</span>
               </div>
-              <div style={{ fontSize:12, color:muted, lineHeight:1.6 }}>{sel.content.slice(0,200)}{sel.content.length>200?'…':''}</div>
+              <div style={{ fontSize:12, color:muted, lineHeight:1.5 }}>{sel.content.slice(0,150)}{sel.content.length>150?'…':''}</div>
             </div>
           )}
-
           {!showResearch ? (
             <button onClick={() => { setResearchQuery(topic); setShowResearch(true); }}
               style={{ transform:'skewX(-6deg)', background:'transparent', border:`1px solid ${C.amber}`, color:C.amber, padding:'6px 14px', borderRadius:'2px 7px 2px 7px', cursor:'pointer', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
-              <span style={{ display:'flex', transform:'skewX(6deg)', alignItems:'center', gap:6 }}><Search size={12} /> Research with Perplexity</span>
+              <span style={{ display:'flex', transform:'skewX(6deg)', alignItems:'center', gap:6 }}><Search size={12}/> Research with Perplexity</span>
             </button>
           ) : (
             <ResearchForm accentColor={cfg.accent} />
           )}
+          {data.sources.length === 0 && !showResearch && (
+            <div style={{ fontSize:11, color:muted, marginTop:8 }}>No sources yet — upload a file or research with Perplexity</div>
+          )}
         </Box>
 
-        {data.sources.length === 0 && !showResearch && (
-          <div style={{ fontSize:12, color:muted, textAlign:'center', marginBottom:14 }}>
-            No sources yet — upload a file or research a topic with Perplexity above
-          </div>
-        )}
-
-        <div style={{ display:'flex', justifyContent:'center' }}>
-          <Btn accent={cfg.accent} onClick={() => setView('setup')} disabled={!sourceId}>Continue →</Btn>
-        </div>
-      </div>
-    );
-  };
-
-  const Setup = () => {
-    if (!mode) return null;
-    const cfg = MODE_CONFIG[mode];
-    return (
-      <div style={{ maxWidth:540, margin:'0 auto', padding:'0 16px' }}>
-        <button onClick={() => setView('source')} style={{ background:'none', border:'none', color:muted, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, marginBottom:20 }}>
-          <ChevronLeft size={14} /> Back
-        </button>
-        <Box dark={dark} accent={cfg.accent} style={{ marginBottom:14 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8, color:cfg.accent, marginBottom:3 }}>{cfg.icon}<span style={{ fontWeight:700, fontSize:16 }}>{cfg.label}</span></div>
-          <div style={{ fontSize:13, color:muted }}>{topic}</div>
-        </Box>
-
+        {/* Difficulty */}
         <Box dark={dark} style={{ marginBottom:12 }}>
           <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Difficulty</div>
           <div style={{ display:'flex', gap:8 }}>
@@ -835,6 +849,7 @@ export default function RefreisherApp() {
           </div>
         </Box>
 
+        {/* Session Length — flashcards / quiz */}
         {(mode==='flashcards'||mode==='quiz') && (
           <Box dark={dark} style={{ marginBottom:12 }}>
             <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Session Length</div>
@@ -849,6 +864,7 @@ export default function RefreisherApp() {
           </Box>
         )}
 
+        {/* Time Limit — brain dump */}
         {mode==='brain_dump' && (
           <Box dark={dark} style={{ marginBottom:12 }}>
             <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Time Limit (minutes)</div>
@@ -863,6 +879,7 @@ export default function RefreisherApp() {
           </Box>
         )}
 
+        {/* Persona — feynman */}
         {mode==='feynman' && (
           <Box dark={dark} style={{ marginBottom:12 }}>
             <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Explain it to…</div>
@@ -881,8 +898,22 @@ export default function RefreisherApp() {
           </Box>
         )}
 
-        <div style={{ display:'flex', justifyContent:'center', marginTop:16 }}>
-          <Btn accent={cfg.accent} onClick={generate} disabled={busy}>{busy?'Generating…':`Start ${cfg.label}`}</Btn>
+        {/* Model */}
+        <Box dark={dark} style={{ marginBottom:16 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Model</div>
+          <div style={{ fontSize:12, color:muted, marginBottom:10, lineHeight:1.5 }}>{cfg.modelHint}</div>
+          <select value={sessionModel} onChange={e => setSessionModel(e.target.value)}
+            style={{ width:'100%', background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'8px 2px 8px 2px', padding:'8px 12px', fontSize:13, outline:'none' }}>
+            {ALL_MODELS.map(m => (
+              <option key={m.id} value={m.id}>{m.name} — {m.note}</option>
+            ))}
+          </select>
+        </Box>
+
+        <div style={{ display:'flex', justifyContent:'center', marginTop:4 }}>
+          <Btn accent={cfg.accent} onClick={generate} disabled={busy||!sourceId}>
+            {busy ? 'Generating…' : `Start ${cfg.label}`}
+          </Btn>
         </div>
         {err && <div style={{ marginTop:10, textAlign:'center', fontSize:13, color:C.highlight }}>{err}</div>}
       </div>
@@ -1328,7 +1359,6 @@ export default function RefreisherApp() {
   const studyRouter = () => {
     switch (view) {
       case 'home':     return Home();
-      case 'source':   return SourceView();
       case 'setup':    return Setup();
       case 'session':  return sessionRouter();
       case 'complete': return Complete();
