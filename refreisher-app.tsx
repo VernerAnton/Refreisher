@@ -1214,11 +1214,11 @@ export default function RefreisherApp() {
 
   const studyRouter = () => {
     switch (view) {
-      case 'home':     return <Home />;
-      case 'source':   return <SourceView />;
-      case 'setup':    return <Setup />;
+      case 'home':     return Home();
+      case 'source':   return SourceView();
+      case 'setup':    return Setup();
       case 'session':  return sessionRouter();
-      case 'complete': return <Complete />;
+      case 'complete': return Complete();
     }
   };
 
