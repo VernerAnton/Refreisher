@@ -144,7 +144,7 @@ const ragCtx = (sourceId: string | undefined, sources: Source[]): string => {
   if (!sourceId) return '';
   const f = sources.find(x => x.id === sourceId);
   if (!f) return '';
-  return `\n\nReference material — base your content primarily on this:\n---\n${f.content}\n---\n`;
+  return `\n\nReference document:\n---\n${f.content}\n---`;
 };
 
 const fmt     = (s: number) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
@@ -152,7 +152,10 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { mon
 const wc      = (s: string) => s.split(/\s+/).filter(Boolean).length;
 
 // ─── API ──────────────────────────────────────────────────
-const callOpenRouter = async (key: string, model: string, prompt: string): Promise<string> => {
+const callOpenRouter = async (key: string, model: string, prompt: string, system?: string): Promise<string> => {
+  const messages = system
+    ? [{ role: 'system', content: system }, { role: 'user', content: prompt }]
+    : [{ role: 'user', content: prompt }];
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -161,7 +164,7 @@ const callOpenRouter = async (key: string, model: string, prompt: string): Promi
       'HTTP-Referer': 'https://refreisher.vercel.app',
       'X-Title': 'Refreisher',
     },
-    body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model, max_tokens: 4096, messages }),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
@@ -170,19 +173,129 @@ const callOpenRouter = async (key: string, model: string, prompt: string): Promi
   return (await res.json()).choices[0].message.content;
 };
 
-// ─── Prompts ──────────────────────────────────────────────
+// ─── System prompts ───────────────────────────────────────
+const SYS_FLASH = `\
+You are an expert flashcard creator specialising in active-recall study. \
+Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
+
+HOW TO USE THE REFERENCE DOCUMENT
+When a reference document is supplied between --- markers in the user message:
+• Generate cards EXCLUSIVELY from that material. Never introduce facts, terms, or concepts absent from the source.
+• Cover the material comprehensively: key definitions, processes, relationships, rules, exceptions, and anything the source emphasises.
+• If the source is long, prioritise concepts that appear frequently or are marked as important.
+
+When no reference document is supplied, draw on accurate domain knowledge for the requested topic.
+
+CARD QUALITY RULES
+• Front: one focused question, term, or prompt — short enough to read in 3 seconds.
+• Back: a complete but concise answer (1–4 sentences). Enough to fully resolve the front; no padding.
+• Vary question types across the deck: definition → application → "what happens when…" → comparison → cause-and-effect.
+• Beginner: plain language, foundational concepts only.
+• Intermediate: technical terms introduced, moderate depth.
+• Advanced: precise terminology, edge cases, nuance.
+
+OUTPUT — JSON only, schema:
+{"flashcards":[{"front":"...","back":"..."}]}`;
+
+const SYS_QUIZ = `\
+You are an expert multiple-choice question writer for rigorous self-assessment. \
+Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
+
+HOW TO USE THE REFERENCE DOCUMENT
+When a reference document is supplied between --- markers in the user message:
+• Base ALL questions exclusively on that material. Do not test knowledge the source does not cover.
+• Distractors should be plausible to someone who skimmed but clearly wrong to someone who studied the source carefully.
+• Explanations must cite the logic from the source, not general domain knowledge.
+
+When no reference document is supplied, draw on accurate domain knowledge for the requested topic.
+
+QUESTION QUALITY RULES
+• Exactly 4 options per question — labelled implicitly by position (index 0–3).
+• One unambiguously correct answer. Three distinct, plausible distractors.
+• No "all of the above" / "none of the above". No trick questions. No double negatives.
+• Explanation: state clearly why the correct answer is right AND briefly why the most tempting wrong answer is wrong.
+• Beginner: recall-level, straightforward wording.
+• Intermediate: application and interpretation required.
+• Advanced: analysis, edge cases, and nuanced distinctions.
+
+OUTPUT — JSON only, schema:
+{"questions":[{"question":"...","options":["...","...","...","..."],"correctIndex":0,"explanation":"..."}]}`;
+
+const SYS_BRAIN = `\
+You are a tutor evaluating a brain-dump exercise — the student wrote everything they could recall about a topic, \
+from memory, without notes or time to organise. Your job is to give honest, specific, and encouraging feedback.
+
+HOW TO USE THE REFERENCE DOCUMENT
+When a reference document is supplied between --- markers in the user message:
+• Treat it as the authoritative rubric. Identify the key concepts, facts, processes, and relationships it contains.
+• Score the student on how thoroughly and accurately their response covers that material.
+• List the important concepts from the source that the student missed or got wrong.
+• Do not penalise for omitting information that is not present in the source.
+• Strengths and missing items must reference the source material specifically, not generic domain knowledge.
+
+When no reference document is supplied, evaluate against accurate domain knowledge for the topic.
+
+SCORING GUIDE (0–100)
+• 90–100: near-complete coverage with accurate details.
+• 70–89: solid grasp, minor gaps or small inaccuracies.
+• 50–69: core concepts present but significant gaps.
+• 30–49: partial understanding, several key ideas missing or wrong.
+• 0–29: fragmented or mostly inaccurate.
+
+FEEDBACK RULES
+• Strengths: quote or paraphrase what the student wrote when praising.
+• Missing: name specific concepts from the source they omitted or got wrong.
+• Feedback: one-paragraph overall assessment — honest, not harsh.
+• Study tips: 2–4 actionable items ("re-read the section on X", "make a card for the difference between Y and Z").
+
+Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
+OUTPUT schema:
+{"score":75,"strengths":["..."],"missing":["..."],"feedback":"...","studyTips":["..."]}`;
+
+const SYS_FEYNMAN = `\
+You are a communication coach evaluating the Feynman Technique. The student was asked to explain a concept \
+in plain language as if teaching it to a specific audience. Gaps in the explanation reveal gaps in understanding.
+
+HOW TO USE THE REFERENCE DOCUMENT
+When a reference document is supplied between --- markers in the user message:
+• Use it as the factual ground truth for accuracy scoring.
+• Check whether the student's explanation is consistent with the source.
+• Do not penalise for simplifying or analogising — appropriate simplification for the audience is the whole point.
+• Do penalise for factual errors or key omissions that contradict or ignore the source.
+
+When no reference document is supplied, assess accuracy against correct domain knowledge.
+
+SCORING DIMENSIONS (each 0–100)
+• Clarity (30% weight): is the explanation easy to follow for the specified audience? Is the structure logical?
+• Accuracy (35% weight): are the facts correct and consistent with the source / domain knowledge?
+• Completeness (20% weight): are the core concepts covered, or are major ideas missing?
+• Audience fit (15% weight): is the language, vocabulary, and depth right for the specified audience?
+
+Compute overallScore as the weighted average of the four dimensions.
+
+FEEDBACK RULES
+• audienceFit field: one sentence assessing whether they pitched it correctly for the audience.
+• feedback: one paragraph — quote specific phrases the student used when praising or correcting.
+• suggestions: 2–4 concrete rewrites or additions, not abstract advice ("Instead of 'X', try saying…").
+
+Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
+OUTPUT schema:
+{"clarityScore":80,"accuracyScore":85,"completenessScore":70,"overallScore":78,"audienceFit":"...","feedback":"...","suggestions":["..."]}`;
+
+
+// ─── Prompts (user message only — role/behavior is in system prompts) ─────────
 const pFlash = (topic: string, diff: string, n: number, r: string) =>
-  `Generate ${n} flashcards for: "${topic}" at ${diff} level.${r}\nMix definitions, concepts, applications.\nRespond with valid JSON only, no markdown:\n{"flashcards":[{"front":"question","back":"answer"}]}`;
+  `Topic: "${topic}"\nDifficulty: ${diff}\nCard count: ${n}${r}`;
 
 const pQuiz = (topic: string, diff: string, n: number, r: string) =>
-  `Generate ${n} multiple-choice questions for: "${topic}" at ${diff} level.${r}\nEach needs exactly 4 options.\nRespond with valid JSON only, no markdown:\n{"questions":[{"question":"text","options":["A","B","C","D"],"correctIndex":0,"explanation":"why"}]}`;
+  `Topic: "${topic}"\nDifficulty: ${diff}\nQuestion count: ${n}${r}`;
 
 const pBrain = (topic: string, resp: string, r: string) =>
-  `Evaluate this brain dump about "${topic}".${r}\nStudent wrote: "${resp}"\nRespond with valid JSON only, no markdown:\n{"score":75,"strengths":["concept A"],"missing":["concept B"],"feedback":"overall","studyTips":["tip 1"]}`;
+  `Topic: "${topic}"${r}\n\nStudent's brain dump:\n${resp}`;
 
 const pFeynman = (topic: string, resp: string, pid: string, r: string) => {
   const p = PERSONAS.find(x => x.id === pid) || PERSONAS[2];
-  return `Evaluate explanation of "${topic}" for: ${p.name} (${p.description}).${r}\nStudent wrote: "${resp}"\nRespond with valid JSON only, no markdown:\n{"clarityScore":80,"accuracyScore":85,"completenessScore":70,"overallScore":78,"audienceFit":"did they pitch correctly?","feedback":"overall","suggestions":["suggestion 1"]}`;
+  return `Topic: "${topic}"\nTarget audience: ${p.name} — ${p.description}${r}\n\nStudent's explanation:\n${resp}`;
 };
 
 // ─── UI Primitives ────────────────────────────────────────
@@ -347,9 +460,9 @@ export default function RefreisherApp() {
   const diag   = (a = C.accent) => ({ backgroundImage: `repeating-linear-gradient(45deg,transparent,transparent 38px,${a}07 38px,${a}07 39px)` });
 
   // ─── API wrappers ───
-  const gen      = (prompt: string) => callOpenRouter(apiKey, genModel,       prompt);
-  const eval_    = (prompt: string) => callOpenRouter(apiKey, evalModel,      prompt);
-  const research = (prompt: string) => callOpenRouter(apiKey, RESEARCH_MODEL, prompt);
+  const gen      = (prompt: string, system?: string) => callOpenRouter(apiKey, genModel,       prompt, system);
+  const eval_    = (prompt: string, system?: string) => callOpenRouter(apiKey, evalModel,      prompt, system);
+  const research = (prompt: string)                  => callOpenRouter(apiKey, RESEARCH_MODEL, prompt);
 
   // ─── Settings ───
   const saveKey = () => {
@@ -472,7 +585,7 @@ export default function RefreisherApp() {
     if (!resp.trim() || !sesh) return;
     setBusy(true); setTon(false);
     try {
-      const fb = parseAI(await eval_(pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources))));
+      const fb = parseAI(await eval_(pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources)), SYS_BRAIN));
       setFbk(fb);
       patch(sesh.items[0].id, { userResponse: resp, aiFeedback: JSON.stringify(fb), aiScore: fb.score });
     } catch { setErr('Evaluation failed — please try again.'); }
@@ -483,7 +596,7 @@ export default function RefreisherApp() {
     if (!resp.trim() || !sesh) return;
     setBusy(true);
     try {
-      const fb = parseAI(await eval_(pFeynman(sesh.topic, resp, persona, ragCtx(sesh.sourceId, data.sources))));
+      const fb = parseAI(await eval_(pFeynman(sesh.topic, resp, persona, ragCtx(sesh.sourceId, data.sources)), SYS_FEYNMAN));
       setFbk(fb);
       patch(sesh.items[0].id, {
         userResponse: resp, persona, aiFeedback: JSON.stringify(fb), aiScore: fb.overallScore,
@@ -515,10 +628,10 @@ export default function RefreisherApp() {
     try {
       let items: StudyItem[] = [];
       if (mode === 'flashcards') {
-        const d = parseAI(await gen(pFlash(topic, diff, len, r)));
+        const d = parseAI(await gen(pFlash(topic, diff, len, r), SYS_FLASH));
         items = (d.flashcards||[]).map((f: any) => ({ id:uid(), front:f.front, back:f.back, _syncMeta:{synced:false} }));
       } else if (mode === 'quiz') {
-        const d = parseAI(await gen(pQuiz(topic, diff, len, r)));
+        const d = parseAI(await gen(pQuiz(topic, diff, len, r), SYS_QUIZ));
         items = (d.questions||[]).map((q: any) => ({ id:uid(), question:q.question, options:q.options, correctIndex:q.correctIndex, explanation:q.explanation, _syncMeta:{synced:false} }));
       } else {
         items = [{ id:uid(), _syncMeta:{synced:false} }];
