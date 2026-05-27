@@ -12,7 +12,7 @@ type Difficulty = 'beginner' | 'intermediate' | 'advanced';
 type Status     = 'not_started' | 'in_progress' | 'completed';
 type Rating     = 'easy' | 'medium' | 'hard';
 type Tab        = 'study' | 'library' | 'sources' | 'stats';
-type StudyView  = 'home' | 'source' | 'setup' | 'session' | 'complete';
+type StudyView  = 'home' | 'setup' | 'session' | 'complete';
 
 interface StudyItem {
   id: string;
@@ -31,6 +31,7 @@ interface Session {
   sessionLength: number; status: Status; score?: number; maxScore?: number; notes: string;
   sourceId?: string;
   ragFileId?: string; // legacy compat
+  model?: string;
   items: StudyItem[];
   createdAt: string; completedAt?: string; updatedAt: string;
   _syncMeta?: { synced: boolean; syncedAt?: string };
@@ -65,11 +66,31 @@ const PERSONAS = [
   { id: 'professor',name: 'Domain expert',      description: 'Precise terminology, full depth' },
 ];
 
-const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.ReactNode; description: string }> = {
-  flashcards: { label: 'Flashcards', accent: '#FF6B89', icon: <BookOpen size={20} />, description: 'Flip cards to test recall' },
-  quiz:        { label: 'Quiz',       accent: '#FF002C', icon: <Brain size={20} />,    description: 'Multiple-choice with immediate feedback' },
-  brain_dump:  { label: 'Brain Dump', accent: '#C97B9E', icon: <Edit3 size={20} />,    description: 'Timed free recall — write everything you know' },
-  feynman:     { label: 'Feynman',    accent: '#FF8C69', icon: <User size={20} />,     description: 'Explain the concept to an audience' },
+const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.ReactNode; description: string; tier: 'gen' | 'eval'; modelHint: string }> = {
+  flashcards: {
+    label: 'Flashcards', accent: '#FF6B89', icon: <BookOpen size={20} />,
+    description: 'Flip cards to test recall',
+    tier: 'gen',
+    modelHint: 'Pure JSON generation — any fast model handles this perfectly. Best place to save cost.',
+  },
+  quiz: {
+    label: 'Quiz', accent: '#FF002C', icon: <Brain size={20} />,
+    description: 'Multiple-choice with immediate feedback',
+    tier: 'gen',
+    modelHint: 'Needs coherent distractors — a mid-tier model reduces nonsensical wrong answers.',
+  },
+  brain_dump: {
+    label: 'Brain Dump', accent: '#C97B9E', icon: <Edit3 size={20} />,
+    description: 'Timed free recall — write everything you know',
+    tier: 'eval',
+    modelHint: 'Has to read your response against the source and score it honestly. A stronger model gives meaningfully better feedback.',
+  },
+  feynman: {
+    label: 'Feynman', accent: '#FF8C69', icon: <User size={20} />,
+    description: 'Explain the concept to an audience',
+    tier: 'eval',
+    modelHint: 'Most demanding — judges clarity, accuracy, and audience fit, then suggests concrete rewrites. Worth upgrading here.',
+  },
 };
 
 const GENERATION_MODELS = [
@@ -89,6 +110,17 @@ const EVALUATION_MODELS = [
 ];
 
 const RESEARCH_MODEL = 'perplexity/sonar-deep-research';
+
+const ALL_MODELS = [
+  { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B',       note: 'free · smallest' },
+  { id: 'google/gemini-flash-1.5-8b',            name: 'Gemini Flash 1.5 8B', note: 'ultra cheap' },
+  { id: 'google/gemini-2.0-flash-001',           name: 'Gemini 2.0 Flash',    note: 'fast · cheap' },
+  { id: 'openai/gpt-4o-mini',                    name: 'GPT-4o Mini',         note: 'fast · cheap' },
+  { id: 'anthropic/claude-haiku-4-5-20251001',   name: 'Claude Haiku 4.5',    note: 'fast · cheap' },
+  { id: 'anthropic/claude-sonnet-4-6',           name: 'Claude Sonnet 4.6',   note: 'balanced' },
+  { id: 'openai/gpt-4o',                         name: 'GPT-4o',              note: 'strong' },
+  { id: 'google/gemini-2.5-pro-preview',         name: 'Gemini 2.5 Pro',      note: 'strongest' },
+];
 
 const C = {
   bgDark: '#0D1628', bgLight: '#FFF0F3',
@@ -144,7 +176,7 @@ const ragCtx = (sourceId: string | undefined, sources: Source[]): string => {
   if (!sourceId) return '';
   const f = sources.find(x => x.id === sourceId);
   if (!f) return '';
-  return `\n\nReference material — base your content primarily on this:\n---\n${f.content}\n---\n`;
+  return `\n\nReference document:\n---\n${f.content}\n---`;
 };
 
 const fmt     = (s: number) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
@@ -152,7 +184,10 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { mon
 const wc      = (s: string) => s.split(/\s+/).filter(Boolean).length;
 
 // ─── API ──────────────────────────────────────────────────
-const callOpenRouter = async (key: string, model: string, prompt: string): Promise<string> => {
+const callOpenRouter = async (key: string, model: string, prompt: string, system?: string): Promise<string> => {
+  const messages = system
+    ? [{ role: 'system', content: system }, { role: 'user', content: prompt }]
+    : [{ role: 'user', content: prompt }];
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -161,7 +196,7 @@ const callOpenRouter = async (key: string, model: string, prompt: string): Promi
       'HTTP-Referer': 'https://refreisher.vercel.app',
       'X-Title': 'Refreisher',
     },
-    body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model, max_tokens: 4096, messages }),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
@@ -170,19 +205,129 @@ const callOpenRouter = async (key: string, model: string, prompt: string): Promi
   return (await res.json()).choices[0].message.content;
 };
 
-// ─── Prompts ──────────────────────────────────────────────
+// ─── System prompts ───────────────────────────────────────
+const SYS_FLASH = `\
+You are an expert flashcard creator specialising in active-recall study. \
+Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
+
+HOW TO USE THE REFERENCE DOCUMENT
+When a reference document is supplied between --- markers in the user message:
+• Generate cards EXCLUSIVELY from that material. Never introduce facts, terms, or concepts absent from the source.
+• Cover the material comprehensively: key definitions, processes, relationships, rules, exceptions, and anything the source emphasises.
+• If the source is long, prioritise concepts that appear frequently or are marked as important.
+
+When no reference document is supplied, draw on accurate domain knowledge for the requested topic.
+
+CARD QUALITY RULES
+• Front: one focused question, term, or prompt — short enough to read in 3 seconds.
+• Back: a complete but concise answer (1–4 sentences). Enough to fully resolve the front; no padding.
+• Vary question types across the deck: definition → application → "what happens when…" → comparison → cause-and-effect.
+• Beginner: plain language, foundational concepts only.
+• Intermediate: technical terms introduced, moderate depth.
+• Advanced: precise terminology, edge cases, nuance.
+
+OUTPUT — JSON only, schema:
+{"flashcards":[{"front":"...","back":"..."}]}`;
+
+const SYS_QUIZ = `\
+You are an expert multiple-choice question writer for rigorous self-assessment. \
+Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
+
+HOW TO USE THE REFERENCE DOCUMENT
+When a reference document is supplied between --- markers in the user message:
+• Base ALL questions exclusively on that material. Do not test knowledge the source does not cover.
+• Distractors should be plausible to someone who skimmed but clearly wrong to someone who studied the source carefully.
+• Explanations must cite the logic from the source, not general domain knowledge.
+
+When no reference document is supplied, draw on accurate domain knowledge for the requested topic.
+
+QUESTION QUALITY RULES
+• Exactly 4 options per question — labelled implicitly by position (index 0–3).
+• One unambiguously correct answer. Three distinct, plausible distractors.
+• No "all of the above" / "none of the above". No trick questions. No double negatives.
+• Explanation: state clearly why the correct answer is right AND briefly why the most tempting wrong answer is wrong.
+• Beginner: recall-level, straightforward wording.
+• Intermediate: application and interpretation required.
+• Advanced: analysis, edge cases, and nuanced distinctions.
+
+OUTPUT — JSON only, schema:
+{"questions":[{"question":"...","options":["...","...","...","..."],"correctIndex":0,"explanation":"..."}]}`;
+
+const SYS_BRAIN = `\
+You are a tutor evaluating a brain-dump exercise — the student wrote everything they could recall about a topic, \
+from memory, without notes or time to organise. Your job is to give honest, specific, and encouraging feedback.
+
+HOW TO USE THE REFERENCE DOCUMENT
+When a reference document is supplied between --- markers in the user message:
+• Treat it as the authoritative rubric. Identify the key concepts, facts, processes, and relationships it contains.
+• Score the student on how thoroughly and accurately their response covers that material.
+• List the important concepts from the source that the student missed or got wrong.
+• Do not penalise for omitting information that is not present in the source.
+• Strengths and missing items must reference the source material specifically, not generic domain knowledge.
+
+When no reference document is supplied, evaluate against accurate domain knowledge for the topic.
+
+SCORING GUIDE (0–100)
+• 90–100: near-complete coverage with accurate details.
+• 70–89: solid grasp, minor gaps or small inaccuracies.
+• 50–69: core concepts present but significant gaps.
+• 30–49: partial understanding, several key ideas missing or wrong.
+• 0–29: fragmented or mostly inaccurate.
+
+FEEDBACK RULES
+• Strengths: quote or paraphrase what the student wrote when praising.
+• Missing: name specific concepts from the source they omitted or got wrong.
+• Feedback: one-paragraph overall assessment — honest, not harsh.
+• Study tips: 2–4 actionable items ("re-read the section on X", "make a card for the difference between Y and Z").
+
+Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
+OUTPUT schema:
+{"score":75,"strengths":["..."],"missing":["..."],"feedback":"...","studyTips":["..."]}`;
+
+const SYS_FEYNMAN = `\
+You are a communication coach evaluating the Feynman Technique. The student was asked to explain a concept \
+in plain language as if teaching it to a specific audience. Gaps in the explanation reveal gaps in understanding.
+
+HOW TO USE THE REFERENCE DOCUMENT
+When a reference document is supplied between --- markers in the user message:
+• Use it as the factual ground truth for accuracy scoring.
+• Check whether the student's explanation is consistent with the source.
+• Do not penalise for simplifying or analogising — appropriate simplification for the audience is the whole point.
+• Do penalise for factual errors or key omissions that contradict or ignore the source.
+
+When no reference document is supplied, assess accuracy against correct domain knowledge.
+
+SCORING DIMENSIONS (each 0–100)
+• Clarity (30% weight): is the explanation easy to follow for the specified audience? Is the structure logical?
+• Accuracy (35% weight): are the facts correct and consistent with the source / domain knowledge?
+• Completeness (20% weight): are the core concepts covered, or are major ideas missing?
+• Audience fit (15% weight): is the language, vocabulary, and depth right for the specified audience?
+
+Compute overallScore as the weighted average of the four dimensions.
+
+FEEDBACK RULES
+• audienceFit field: one sentence assessing whether they pitched it correctly for the audience.
+• feedback: one paragraph — quote specific phrases the student used when praising or correcting.
+• suggestions: 2–4 concrete rewrites or additions, not abstract advice ("Instead of 'X', try saying…").
+
+Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
+OUTPUT schema:
+{"clarityScore":80,"accuracyScore":85,"completenessScore":70,"overallScore":78,"audienceFit":"...","feedback":"...","suggestions":["..."]}`;
+
+
+// ─── Prompts (user message only — role/behavior is in system prompts) ─────────
 const pFlash = (topic: string, diff: string, n: number, r: string) =>
-  `Generate ${n} flashcards for: "${topic}" at ${diff} level.${r}\nMix definitions, concepts, applications.\nRespond with valid JSON only, no markdown:\n{"flashcards":[{"front":"question","back":"answer"}]}`;
+  `Topic: "${topic}"\nDifficulty: ${diff}\nCard count: ${n}${r}`;
 
 const pQuiz = (topic: string, diff: string, n: number, r: string) =>
-  `Generate ${n} multiple-choice questions for: "${topic}" at ${diff} level.${r}\nEach needs exactly 4 options.\nRespond with valid JSON only, no markdown:\n{"questions":[{"question":"text","options":["A","B","C","D"],"correctIndex":0,"explanation":"why"}]}`;
+  `Topic: "${topic}"\nDifficulty: ${diff}\nQuestion count: ${n}${r}`;
 
 const pBrain = (topic: string, resp: string, r: string) =>
-  `Evaluate this brain dump about "${topic}".${r}\nStudent wrote: "${resp}"\nRespond with valid JSON only, no markdown:\n{"score":75,"strengths":["concept A"],"missing":["concept B"],"feedback":"overall","studyTips":["tip 1"]}`;
+  `Topic: "${topic}"${r}\n\nStudent's brain dump:\n${resp}`;
 
 const pFeynman = (topic: string, resp: string, pid: string, r: string) => {
   const p = PERSONAS.find(x => x.id === pid) || PERSONAS[2];
-  return `Evaluate explanation of "${topic}" for: ${p.name} (${p.description}).${r}\nStudent wrote: "${resp}"\nRespond with valid JSON only, no markdown:\n{"clarityScore":80,"accuracyScore":85,"completenessScore":70,"overallScore":78,"audienceFit":"did they pitch correctly?","feedback":"overall","suggestions":["suggestion 1"]}`;
+  return `Topic: "${topic}"\nTarget audience: ${p.name} — ${p.description}${r}\n\nStudent's explanation:\n${resp}`;
 };
 
 // ─── UI Primitives ────────────────────────────────────────
@@ -289,6 +434,7 @@ export default function RefreisherApp() {
   // Setup
   const [topic, setTopic]       = useState('');
   const [mode, setMode]         = useState<Mode | null>(null);
+  const [sessionModel, setSessionModel] = useState(genModel);
   const [diff, setDiff]         = useState<Difficulty>('intermediate');
   const [len, setLen]           = useState(10);
   const [deckId, setDeckId]     = useState('');
@@ -347,8 +493,6 @@ export default function RefreisherApp() {
   const diag   = (a = C.accent) => ({ backgroundImage: `repeating-linear-gradient(45deg,transparent,transparent 38px,${a}07 38px,${a}07 39px)` });
 
   // ─── API wrappers ───
-  const gen      = (prompt: string) => callOpenRouter(apiKey, genModel,       prompt);
-  const eval_    = (prompt: string) => callOpenRouter(apiKey, evalModel,      prompt);
   const research = (prompt: string) => callOpenRouter(apiKey, RESEARCH_MODEL, prompt);
 
   // ─── Settings ───
@@ -472,7 +616,8 @@ export default function RefreisherApp() {
     if (!resp.trim() || !sesh) return;
     setBusy(true); setTon(false);
     try {
-      const fb = parseAI(await eval_(pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources))));
+      const m = sesh.model || evalModel;
+      const fb = parseAI(await callOpenRouter(apiKey, m, pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources)), SYS_BRAIN));
       setFbk(fb);
       patch(sesh.items[0].id, { userResponse: resp, aiFeedback: JSON.stringify(fb), aiScore: fb.score });
     } catch { setErr('Evaluation failed — please try again.'); }
@@ -483,7 +628,8 @@ export default function RefreisherApp() {
     if (!resp.trim() || !sesh) return;
     setBusy(true);
     try {
-      const fb = parseAI(await eval_(pFeynman(sesh.topic, resp, persona, ragCtx(sesh.sourceId, data.sources))));
+      const m = sesh.model || evalModel;
+      const fb = parseAI(await callOpenRouter(apiKey, m, pFeynman(sesh.topic, resp, persona, ragCtx(sesh.sourceId, data.sources)), SYS_FEYNMAN));
       setFbk(fb);
       patch(sesh.items[0].id, {
         userResponse: resp, persona, aiFeedback: JSON.stringify(fb), aiScore: fb.overallScore,
@@ -512,20 +658,21 @@ export default function RefreisherApp() {
     let did = deckId || mkDeck(topic);
     if (!deckId) setDeckId(did);
     const r = ragCtx(sourceId, data.sources);
+    const call = (prompt: string, sys: string) => callOpenRouter(apiKey, sessionModel, prompt, sys);
     try {
       let items: StudyItem[] = [];
       if (mode === 'flashcards') {
-        const d = parseAI(await gen(pFlash(topic, diff, len, r)));
+        const d = parseAI(await call(pFlash(topic, diff, len, r), SYS_FLASH));
         items = (d.flashcards||[]).map((f: any) => ({ id:uid(), front:f.front, back:f.back, _syncMeta:{synced:false} }));
       } else if (mode === 'quiz') {
-        const d = parseAI(await gen(pQuiz(topic, diff, len, r)));
+        const d = parseAI(await call(pQuiz(topic, diff, len, r), SYS_QUIZ));
         items = (d.questions||[]).map((q: any) => ({ id:uid(), question:q.question, options:q.options, correctIndex:q.correctIndex, explanation:q.explanation, _syncMeta:{synced:false} }));
       } else {
         items = [{ id:uid(), _syncMeta:{synced:false} }];
       }
       const s: Session = {
         id:uid(), deckId:did, topic, mode, difficulty:diff, sessionLength:len,
-        status:'in_progress', notes:'', sourceId, items,
+        status:'in_progress', notes:'', sourceId, model:sessionModel, items,
         createdAt:ts(), updatedAt:ts(), _syncMeta:{synced:false},
       };
       upd(d => ({ ...d, sessions:[...d.sessions, s], subjectHistory:[topic, ...d.subjectHistory.filter(h=>h!==topic)].slice(0,10) }));
@@ -623,7 +770,7 @@ export default function RefreisherApp() {
           return (
             <Box key={m} dark={dark} accent={can ? cfg.accent : undefined}
               style={{ cursor:can?'pointer':'not-allowed', opacity:can?1:0.45, transition:'opacity 0.15s' }}
-              onClick={() => can && (setMode(m), setView('source'), setErr(null))}>
+              onClick={() => { if (!can) return; setMode(m); setSessionModel(MODE_CONFIG[m].tier === 'gen' ? genModel : evalModel); setView('setup'); setErr(null); setShowResearch(false); }}>
               <div style={{ color:cfg.accent, marginBottom:8 }}>{cfg.icon}</div>
               <div style={{ fontWeight:700, fontSize:15, marginBottom:3 }}>{cfg.label}</div>
               <div style={{ fontSize:12, color:muted }}>{cfg.description}</div>
@@ -635,23 +782,27 @@ export default function RefreisherApp() {
     </div>
   );
 
-  const SourceView = () => {
+  const Setup = () => {
     if (!mode) return null;
     const cfg = MODE_CONFIG[mode];
     const sel = sourceId ? data.sources.find(s => s.id === sourceId) : null;
     return (
       <div style={{ maxWidth:560, margin:'0 auto', padding:'0 16px' }}>
-        <button onClick={() => { setView('home'); setMode(null); }} style={{ background:'none', border:'none', color:muted, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, marginBottom:20 }}>
+        <button onClick={() => { setView('home'); setMode(null); setShowResearch(false); }}
+          style={{ background:'none', border:'none', color:muted, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, marginBottom:20 }}>
           <ChevronLeft size={14} /> Back
         </button>
+
+        {/* Mode header */}
         <Box dark={dark} accent={cfg.accent} style={{ marginBottom:14 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, color:cfg.accent, marginBottom:3 }}>{cfg.icon}<span style={{ fontWeight:700, fontSize:16 }}>{cfg.label}</span></div>
           <div style={{ fontSize:13, color:muted }}>{topic}</div>
         </Box>
 
-        <Box dark={dark} style={{ marginBottom:14 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Choose a Source</div>
-          <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+        {/* Source */}
+        <Box dark={dark} style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Source</div>
+          <div style={{ display:'flex', gap:8, marginBottom:sel ? 10 : 0 }}>
             <select value={sourceId||''} onChange={e => setSourceId(e.target.value || undefined)}
               style={{ flex:1, background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'6px 2px 6px 2px', padding:'8px 10px', fontSize:13, outline:'none' }}>
               <option value="">Select a source…</option>
@@ -660,56 +811,32 @@ export default function RefreisherApp() {
             <Btn sm variant="outline" accent={cfg.accent} onClick={() => fileRef.current?.click()}>Upload</Btn>
             <input ref={fileRef} type="file" accept=".txt,.md,text/plain,text/markdown" style={{ display:'none' }} onChange={uploadFile} />
           </div>
-
           {sel && (
-            <div style={{ padding:'10px 12px', background:`${cfg.accent}10`, borderRadius:'6px 2px 6px 2px', marginBottom:10 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+            <div style={{ padding:'9px 12px', background:`${cfg.accent}10`, borderRadius:'6px 2px 6px 2px', marginBottom:10 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
                 <span style={{ fontWeight:700, fontSize:13 }}>{sel.name}</span>
                 <span style={{ fontSize:10, fontWeight:700, background:sel.origin==='perplexity'?`${C.amber}20`:`${C.accent}20`, color:sel.origin==='perplexity'?C.amber:C.accent, padding:'2px 6px', borderRadius:'3px' }}>
                   {sel.origin==='perplexity' ? 'Perplexity' : 'Upload'}
                 </span>
                 <span style={{ fontSize:11, color:muted }}>{wc(sel.content).toLocaleString()} words</span>
               </div>
-              <div style={{ fontSize:12, color:muted, lineHeight:1.6 }}>{sel.content.slice(0,200)}{sel.content.length>200?'…':''}</div>
+              <div style={{ fontSize:12, color:muted, lineHeight:1.5 }}>{sel.content.slice(0,150)}{sel.content.length>150?'…':''}</div>
             </div>
           )}
-
           {!showResearch ? (
             <button onClick={() => { setResearchQuery(topic); setShowResearch(true); }}
               style={{ transform:'skewX(-6deg)', background:'transparent', border:`1px solid ${C.amber}`, color:C.amber, padding:'6px 14px', borderRadius:'2px 7px 2px 7px', cursor:'pointer', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
-              <span style={{ display:'flex', transform:'skewX(6deg)', alignItems:'center', gap:6 }}><Search size={12} /> Research with Perplexity</span>
+              <span style={{ display:'flex', transform:'skewX(6deg)', alignItems:'center', gap:6 }}><Search size={12}/> Research with Perplexity</span>
             </button>
           ) : (
             <ResearchForm accentColor={cfg.accent} />
           )}
+          {data.sources.length === 0 && !showResearch && (
+            <div style={{ fontSize:11, color:muted, marginTop:8 }}>No sources yet — upload a file or research with Perplexity</div>
+          )}
         </Box>
 
-        {data.sources.length === 0 && !showResearch && (
-          <div style={{ fontSize:12, color:muted, textAlign:'center', marginBottom:14 }}>
-            No sources yet — upload a file or research a topic with Perplexity above
-          </div>
-        )}
-
-        <div style={{ display:'flex', justifyContent:'center' }}>
-          <Btn accent={cfg.accent} onClick={() => setView('setup')} disabled={!sourceId}>Continue →</Btn>
-        </div>
-      </div>
-    );
-  };
-
-  const Setup = () => {
-    if (!mode) return null;
-    const cfg = MODE_CONFIG[mode];
-    return (
-      <div style={{ maxWidth:540, margin:'0 auto', padding:'0 16px' }}>
-        <button onClick={() => setView('source')} style={{ background:'none', border:'none', color:muted, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontSize:13, marginBottom:20 }}>
-          <ChevronLeft size={14} /> Back
-        </button>
-        <Box dark={dark} accent={cfg.accent} style={{ marginBottom:14 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8, color:cfg.accent, marginBottom:3 }}>{cfg.icon}<span style={{ fontWeight:700, fontSize:16 }}>{cfg.label}</span></div>
-          <div style={{ fontSize:13, color:muted }}>{topic}</div>
-        </Box>
-
+        {/* Difficulty */}
         <Box dark={dark} style={{ marginBottom:12 }}>
           <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Difficulty</div>
           <div style={{ display:'flex', gap:8 }}>
@@ -722,6 +849,7 @@ export default function RefreisherApp() {
           </div>
         </Box>
 
+        {/* Session Length — flashcards / quiz */}
         {(mode==='flashcards'||mode==='quiz') && (
           <Box dark={dark} style={{ marginBottom:12 }}>
             <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Session Length</div>
@@ -736,6 +864,7 @@ export default function RefreisherApp() {
           </Box>
         )}
 
+        {/* Time Limit — brain dump */}
         {mode==='brain_dump' && (
           <Box dark={dark} style={{ marginBottom:12 }}>
             <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Time Limit (minutes)</div>
@@ -750,6 +879,7 @@ export default function RefreisherApp() {
           </Box>
         )}
 
+        {/* Persona — feynman */}
         {mode==='feynman' && (
           <Box dark={dark} style={{ marginBottom:12 }}>
             <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Explain it to…</div>
@@ -768,8 +898,22 @@ export default function RefreisherApp() {
           </Box>
         )}
 
-        <div style={{ display:'flex', justifyContent:'center', marginTop:16 }}>
-          <Btn accent={cfg.accent} onClick={generate} disabled={busy}>{busy?'Generating…':`Start ${cfg.label}`}</Btn>
+        {/* Model */}
+        <Box dark={dark} style={{ marginBottom:16 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Model</div>
+          <div style={{ fontSize:12, color:muted, marginBottom:10, lineHeight:1.5 }}>{cfg.modelHint}</div>
+          <select value={sessionModel} onChange={e => setSessionModel(e.target.value)}
+            style={{ width:'100%', background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'8px 2px 8px 2px', padding:'8px 12px', fontSize:13, outline:'none' }}>
+            {ALL_MODELS.map(m => (
+              <option key={m.id} value={m.id}>{m.name} — {m.note}</option>
+            ))}
+          </select>
+        </Box>
+
+        <div style={{ display:'flex', justifyContent:'center', marginTop:4 }}>
+          <Btn accent={cfg.accent} onClick={generate} disabled={busy||!sourceId}>
+            {busy ? 'Generating…' : `Start ${cfg.label}`}
+          </Btn>
         </div>
         {err && <div style={{ marginTop:10, textAlign:'center', fontSize:13, color:C.highlight }}>{err}</div>}
       </div>
@@ -1215,7 +1359,6 @@ export default function RefreisherApp() {
   const studyRouter = () => {
     switch (view) {
       case 'home':     return Home();
-      case 'source':   return SourceView();
       case 'setup':    return Setup();
       case 'session':  return sessionRouter();
       case 'complete': return Complete();
