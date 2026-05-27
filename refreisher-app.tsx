@@ -465,6 +465,13 @@ export default function RefreisherApp() {
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data]);
 
   useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setDark(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  useEffect(() => {
     if (!ton) return;
     if (tsecs <= 0) { setTon(false); return; }
     const id = setInterval(() => setTsecs(s => s - 1), 1000);
