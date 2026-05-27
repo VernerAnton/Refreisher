@@ -94,32 +94,20 @@ const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.Rea
 };
 
 const GENERATION_MODELS = [
-  { id: 'google/gemini-2.0-flash-001',           name: 'Gemini 2.0 Flash',    note: 'fastest · cheapest' },
-  { id: 'anthropic/claude-haiku-4-5-20251001',   name: 'Claude Haiku 4.5',    note: 'fast · cheap' },
-  { id: 'openai/gpt-4o-mini',                    name: 'GPT-4o Mini',         note: 'fast · cheap' },
-  { id: 'google/gemini-flash-1.5-8b',            name: 'Gemini Flash 1.5 8B', note: 'ultra cheap' },
-  { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B',        note: 'free tier' },
+  { id: 'anthropic/claude-haiku-latest',  name: 'Claude Haiku',  note: 'fast · always latest' },
+  { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet', note: 'balanced · always latest' },
 ];
 
 const EVALUATION_MODELS = [
-  { id: 'anthropic/claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5',  note: 'fast · cheap' },
-  { id: 'google/gemini-2.0-flash-001',         name: 'Gemini 2.0 Flash',  note: 'fast · cheap' },
-  { id: 'anthropic/claude-sonnet-4-6',         name: 'Claude Sonnet 4.6', note: 'balanced' },
-  { id: 'openai/gpt-4o',                       name: 'GPT-4o',            note: 'strong judgment' },
-  { id: 'google/gemini-2.5-pro-preview',       name: 'Gemini 2.5 Pro',   note: 'strongest' },
+  { id: 'anthropic/claude-haiku-latest',  name: 'Claude Haiku',  note: 'fast · always latest' },
+  { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet', note: 'balanced · always latest' },
 ];
 
 const RESEARCH_MODEL = 'perplexity/sonar-deep-research';
 
 const ALL_MODELS = [
-  { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B',       note: 'free · smallest' },
-  { id: 'google/gemini-flash-1.5-8b',            name: 'Gemini Flash 1.5 8B', note: 'ultra cheap' },
-  { id: 'google/gemini-2.0-flash-001',           name: 'Gemini 2.0 Flash',    note: 'fast · cheap' },
-  { id: 'openai/gpt-4o-mini',                    name: 'GPT-4o Mini',         note: 'fast · cheap' },
-  { id: 'anthropic/claude-haiku-4-5-20251001',   name: 'Claude Haiku 4.5',    note: 'fast · cheap' },
-  { id: 'anthropic/claude-sonnet-4-6',           name: 'Claude Sonnet 4.6',   note: 'balanced' },
-  { id: 'openai/gpt-4o',                         name: 'GPT-4o',              note: 'strong' },
-  { id: 'google/gemini-2.5-pro-preview',         name: 'Gemini 2.5 Pro',      note: 'strongest' },
+  { id: 'anthropic/claude-haiku-latest',  name: 'Claude Haiku',  note: 'fast · always latest' },
+  { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet', note: 'balanced · always latest' },
 ];
 
 const C = {
@@ -428,8 +416,8 @@ export default function RefreisherApp() {
   const [apiKey, setApiKey]     = useState(() => localStorage.getItem('openrouter_api_key') || '');
   const [keyInput, setKeyInput] = useState('');
   const [showKey, setShowKey]   = useState(() => !localStorage.getItem('openrouter_api_key'));
-  const [genModel, setGenModel] = useState(() => localStorage.getItem('gen_model') || 'google/gemini-2.0-flash-001');
-  const [evalModel, setEvalModel] = useState(() => localStorage.getItem('eval_model') || 'anthropic/claude-haiku-4-5-20251001');
+  const [genModel, setGenModel] = useState(() => localStorage.getItem('gen_model') || 'anthropic/claude-haiku-latest');
+  const [evalModel, setEvalModel] = useState(() => localStorage.getItem('eval_model') || 'anthropic/claude-sonnet-latest');
 
   // Setup
   const [topic, setTopic]       = useState('');
