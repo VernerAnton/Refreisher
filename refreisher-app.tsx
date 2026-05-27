@@ -434,6 +434,7 @@ export default function RefreisherApp() {
 
   // Perplexity research
   const [researching, setResearching]     = useState(false);
+  const [enhancing, setEnhancing]         = useState(false);
   const [researchQuery, setResearchQuery] = useState('');
   const [showResearch, setShowResearch]   = useState(false);
 
@@ -683,17 +684,42 @@ export default function RefreisherApp() {
 
   const saveNotes = () => { if (!sesh) return; syncSesh({ ...sesh, notes, updatedAt:ts() }); };
 
+  const enhanceQuery = async () => {
+    if (!researchQuery.trim()) return;
+    setEnhancing(true);
+    try {
+      const enhanced = await callOpenRouter(
+        apiKey,
+        'anthropic/claude-sonnet-latest',
+        `Rewrite this brief research topic into a comprehensive, detailed research prompt that will produce thorough, well-structured results from a deep-research search engine. Expand it to specify relevant subtopics, depth of detail, and any important distinctions or nuances to cover. Return only the improved prompt — no explanation, no preamble.\n\nTopic: ${researchQuery}`,
+        'You are a research query optimizer. Your output is always a single improved research prompt and nothing else — no labels, no explanation, just the text of the enhanced query.',
+      );
+      setResearchQuery(enhanced.trim());
+    } catch { setErr('Enhance failed — check your API key.'); }
+    finally { setEnhancing(false); }
+  };
+
   // ─── Shared research form ───
   const ResearchForm = ({ accentColor }: { accentColor: string }) => (
     <Box dark={dark} accent={C.amber} style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 700, fontSize: 14, color: C.amber, marginBottom: 10 }}>Sonar Deep Research</div>
-      <input value={researchQuery} onChange={e => setResearchQuery(e.target.value)}
-        placeholder="e.g. Salesforce Admin certification topics and requirements"
-        style={{ width:'100%', background:'transparent', border:`1px solid ${bdr}`, borderRadius:'8px 2px 8px 2px', padding:'9px 13px', color:fg, fontSize:14, outline:'none', boxSizing:'border-box', marginBottom:10 }}
-        onFocus={e => e.currentTarget.style.borderColor = C.amber}
-        onBlur={e => e.currentTarget.style.borderColor = bdr}
-        onKeyDown={e => e.key==='Enter' && !researching && researchQuery.trim() && submitResearch()}
-      />
+      <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+        <input value={researchQuery} onChange={e => setResearchQuery(e.target.value)}
+          placeholder="e.g. Salesforce Admin certification topics and requirements"
+          style={{ flex:1, background:'transparent', border:`1px solid ${bdr}`, borderRadius:'8px 2px 8px 2px', padding:'9px 13px', color:fg, fontSize:14, outline:'none', boxSizing:'border-box' }}
+          onFocus={e => e.currentTarget.style.borderColor = C.amber}
+          onBlur={e => e.currentTarget.style.borderColor = bdr}
+          onKeyDown={e => e.key==='Enter' && !researching && !enhancing && researchQuery.trim() && submitResearch()}
+        />
+        <Btn sm variant="outline" accent={C.amber} onClick={enhanceQuery} disabled={!researchQuery.trim() || enhancing || researching}>
+          {enhancing ? '…' : '✦ Enhance'}
+        </Btn>
+      </div>
+      {enhancing && (
+        <div style={{ fontSize:12, color:C.amber, marginBottom:8, opacity:0.8 }}>
+          Improving your prompt with Sonnet…
+        </div>
+      )}
       {researching ? (
         <div style={{ fontSize:13, color:C.amber, display:'flex', alignItems:'center', gap:8 }}>
           <Search size={13} style={{ animation:'spin 1s linear infinite' }} />
@@ -701,8 +727,8 @@ export default function RefreisherApp() {
         </div>
       ) : (
         <div style={{ display:'flex', gap:8 }}>
-          <Btn sm accent={C.amber} onClick={submitResearch} disabled={!researchQuery.trim()}>Start Research</Btn>
-          <Btn sm variant="ghost" accent={C.amber} onClick={() => setShowResearch(false)}>Cancel</Btn>
+          <Btn sm accent={C.amber} onClick={submitResearch} disabled={!researchQuery.trim() || enhancing}>Start Research</Btn>
+          <Btn sm variant="ghost" accent={C.amber} onClick={() => { setShowResearch(false); setEnhancing(false); }}>Cancel</Btn>
         </div>
       )}
     </Box>
