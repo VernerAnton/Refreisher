@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   BookOpen, Brain, Edit3, User, Sun, Moon,
   Trash2, Download, Upload, ChevronLeft,
@@ -222,6 +223,7 @@ CARD QUALITY RULES
 • Beginner: plain language, foundational concepts only.
 • Intermediate: technical terms introduced, moderate depth.
 • Advanced: precise terminology, edge cases, nuance.
+• Back values may use markdown (bold, bullet lists) where it aids clarity. Front values must be plain text.
 
 OUTPUT — JSON only, schema:
 {"flashcards":[{"front":"...","back":"..."}]}`;
@@ -246,6 +248,7 @@ QUESTION QUALITY RULES
 • Beginner: recall-level, straightforward wording.
 • Intermediate: application and interpretation required.
 • Advanced: analysis, edge cases, and nuanced distinctions.
+• Question and option values must be plain text. Explanation values may use markdown where it aids clarity.
 
 OUTPUT — JSON only, schema:
 {"questions":[{"question":"...","options":["...","...","...","..."],"correctIndex":0,"explanation":"..."}]}`;
@@ -276,6 +279,7 @@ FEEDBACK RULES
 • Missing: name specific concepts from the source they omitted or got wrong.
 • Feedback: one-paragraph overall assessment — honest, not harsh.
 • Study tips: 2–4 actionable items ("re-read the section on X", "make a card for the difference between Y and Z").
+• String values may use markdown (bold, bullet lists) where it aids clarity.
 
 Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
 OUTPUT schema:
@@ -306,6 +310,7 @@ FEEDBACK RULES
 • audienceFit field: one sentence assessing whether they pitched it correctly for the audience.
 • feedback: one paragraph — quote specific phrases the student used when praising or correcting.
 • suggestions: 2–4 concrete rewrites or additions, not abstract advice ("Instead of 'X', try saying…").
+• String values may use markdown (bold, bullet lists) where it aids clarity.
 
 Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
 OUTPUT schema:
@@ -348,6 +353,24 @@ function Btn({ children, onClick, disabled=false, variant='primary', accent, sm 
     }}>
       <span style={{ display:'block', transform:'skewX(8deg)' }}>{children}</span>
     </button>
+  );
+}
+
+function Md({ children, style }: { children: string; style?: React.CSSProperties }) {
+  return (
+    <div style={{ lineHeight: 1.65, ...style }}>
+      <ReactMarkdown
+        components={{
+          p:      ({ children }) => <p style={{ margin: '0 0 6px' }}>{children}</p>,
+          ul:     ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 18 }}>{children}</ul>,
+          ol:     ({ children }) => <ol style={{ margin: '4px 0', paddingLeft: 18 }}>{children}</ol>,
+          li:     ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+          strong: ({ children }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
+          code:   ({ children }) => <code style={{ fontFamily: 'monospace', fontSize: '0.9em', background: 'rgba(128,128,128,0.15)', padding: '1px 4px', borderRadius: 3 }}>{children}</code>,
+          pre:    ({ children }) => <pre style={{ background: 'rgba(128,128,128,0.12)', borderRadius: 6, padding: '10px 14px', overflowX: 'auto', margin: '6px 0', fontSize: 13 }}>{children}</pre>,
+        }}
+      >{children}</ReactMarkdown>
+    </div>
   );
 }
 
@@ -966,7 +989,7 @@ export default function RefreisherApp() {
         <div onClick={() => setFlipped(f=>!f)}
           style={{ marginTop:20, marginBottom:16, background:cardBg, border:`1.5px solid ${flipped?sa:bdr}`, borderRadius:'16px 3px 16px 3px', padding:'44px 28px', minHeight:180, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', transition:'border-color 0.2s' }}>
           <div style={{ fontSize:10, fontWeight:700, color:flipped?sa:muted, marginBottom:10, textTransform:'uppercase', letterSpacing:'0.08em' }}>{flipped?'Answer':'Question'}</div>
-          <div style={{ fontSize:17, fontWeight:500, lineHeight:1.6 }}>{flipped?item.back:item.front}</div>
+          <div style={{ fontSize:17, fontWeight:500, lineHeight:1.6 }}>{flipped?<Md>{item.back!}</Md>:item.front}</div>
           {!flipped && <div style={{ marginTop:14, fontSize:11, color:muted }}>tap to flip</div>}
         </div>
         {flipped
@@ -1013,7 +1036,7 @@ export default function RefreisherApp() {
           <>
             <Box dark={dark} accent={sesh.items[idx].isCorrect?C.green:C.highlight} style={{ marginBottom:12, fontSize:13, lineHeight:1.6 }}>
               <div style={{ fontWeight:700, marginBottom:4, color:sesh.items[idx].isCorrect?C.green:C.highlight }}>{sesh.items[idx].isCorrect?'✓ Correct!':'✗ Incorrect'}</div>
-              {item.explanation}
+              <Md>{item.explanation!}</Md>
             </Box>
             <div style={{ textAlign:'center' }}><div style={{ fontSize:12, color:muted, marginBottom:2 }}>How well did you know this?</div><Ratings onRate={rateNext} /></div>
           </>
@@ -1058,17 +1081,17 @@ export default function RefreisherApp() {
             </div>
             <Box dark={dark} style={{ marginBottom:10 }}>
               <div style={{ fontSize:11, fontWeight:700, color:C.green, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Strengths</div>
-              {(fbk.strengths||[]).map((s:string,i:number) => <div key={i} style={{ fontSize:13, lineHeight:1.6, paddingLeft:10 }}>• {s}</div>)}
+              {(fbk.strengths||[]).map((s:string,i:number) => <div key={i} style={{ fontSize:13, paddingLeft:10 }}><Md>{s}</Md></div>)}
             </Box>
             <Box dark={dark} style={{ marginBottom:10 }}>
               <div style={{ fontSize:11, fontWeight:700, color:C.red, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Missing / Gaps</div>
-              {(fbk.missing||[]).map((s:string,i:number) => <div key={i} style={{ fontSize:13, lineHeight:1.6, paddingLeft:10 }}>• {s}</div>)}
+              {(fbk.missing||[]).map((s:string,i:number) => <div key={i} style={{ fontSize:13, paddingLeft:10 }}><Md>{s}</Md></div>)}
             </Box>
-            <Box dark={dark} style={{ marginBottom:10 }}><div style={{ fontSize:13, lineHeight:1.7 }}>{fbk.feedback}</div></Box>
+            <Box dark={dark} style={{ marginBottom:10 }}><Md style={{ fontSize:13 }}>{fbk.feedback}</Md></Box>
             {(fbk.studyTips?.length??0)>0 && (
               <Box dark={dark} style={{ marginBottom:10 }}>
                 <div style={{ fontSize:11, fontWeight:700, color:sa, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Study Tips</div>
-                {fbk.studyTips.map((t:string,i:number) => <div key={i} style={{ fontSize:13, lineHeight:1.6, paddingLeft:10 }}>→ {t}</div>)}
+                {fbk.studyTips.map((t:string,i:number) => <div key={i} style={{ fontSize:13, paddingLeft:10 }}><Md>{t}</Md></div>)}
               </Box>
             )}
             <div style={{ textAlign:'center', marginTop:16 }}>
@@ -1114,13 +1137,13 @@ export default function RefreisherApp() {
             </div>
             <Box dark={dark} style={{ marginBottom:10 }}>
               <div style={{ fontSize:11, fontWeight:700, color:sa, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Audience Fit</div>
-              <div style={{ fontSize:13, lineHeight:1.6 }}>{fbk.audienceFit}</div>
+              <Md style={{ fontSize:13 }}>{fbk.audienceFit}</Md>
             </Box>
-            <Box dark={dark} style={{ marginBottom:10 }}><div style={{ fontSize:13, lineHeight:1.7 }}>{fbk.feedback}</div></Box>
+            <Box dark={dark} style={{ marginBottom:10 }}><Md style={{ fontSize:13 }}>{fbk.feedback}</Md></Box>
             {(fbk.suggestions?.length??0)>0 && (
               <Box dark={dark} style={{ marginBottom:10 }}>
                 <div style={{ fontSize:11, fontWeight:700, color:sa, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Suggestions</div>
-                {fbk.suggestions.map((s:string,i:number) => <div key={i} style={{ fontSize:13, lineHeight:1.6, paddingLeft:10 }}>→ {s}</div>)}
+                {fbk.suggestions.map((s:string,i:number) => <div key={i} style={{ fontSize:13, paddingLeft:10 }}><Md>{s}</Md></div>)}
               </Box>
             )}
             <div style={{ textAlign:'center', marginTop:16 }}>
