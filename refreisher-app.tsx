@@ -626,6 +626,23 @@ export default function RefreisherApp() {
     finally { setResearching(false); setConverting(false); }
   };
 
+  const slugify = (s: string) => s.replace(/[^a-z0-9_\-\s]/gi, '-').trim().replace(/\s+/g, '-').toLowerCase();
+
+  const downloadSource = (src: Source) => {
+    const blob = new Blob([src.content], { type: 'text/plain' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `${slugify(src.name)}.txt`; a.click();
+  };
+
+  const downloadDeck = (deck: Deck) => {
+    const sessions = data.sessions.filter(s => s.deckId === deck.id);
+    const sourceIds = new Set(sessions.map(s => s.sourceId).filter(Boolean));
+    const sources = data.sources.filter(s => sourceIds.has(s.id));
+    const blob = new Blob([JSON.stringify({ deck, sessions, sources, exportedAt: ts() }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `${slugify(deck.name)}.json`; a.click();
+  };
+
   const exportAll = () => {
     const blob = new Blob([JSON.stringify({ ...data, exportedAt: ts() }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -1337,7 +1354,10 @@ export default function RefreisherApp() {
                   <Box key={d.id} dark={dark} onClick={() => setLibDeck(d.id)} style={{ cursor:'pointer' }}>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
                       <div style={{ fontWeight:700, fontSize:15 }}>{d.name}</div>
-                      <button onClick={e=>{e.stopPropagation();rmDeck(d.id);}} style={{ background:'none', border:'none', color:muted, cursor:'pointer', padding:2 }}><Trash2 size={12}/></button>
+                      <div style={{ display:'flex', gap:4 }}>
+                        <button onClick={e=>{e.stopPropagation();downloadDeck(d);}} style={{ background:'none', border:'none', color:muted, cursor:'pointer', padding:2 }}><Download size={12}/></button>
+                        <button onClick={e=>{e.stopPropagation();rmDeck(d.id);}} style={{ background:'none', border:'none', color:muted, cursor:'pointer', padding:2 }}><Trash2 size={12}/></button>
+                      </div>
                     </div>
                     <div style={{ fontSize:12, color:muted, marginBottom:ds.length>0?10:0 }}>{ds.length} sessions · {done} completed</div>
                     {ds.length>0&&<Bar cur={done} total={ds.length} accent={C.accent}/>}
@@ -1387,6 +1407,7 @@ export default function RefreisherApp() {
                         disabled={!!convertingSourceId}
                       >{convertingSourceId===src.id?'…':src.converted?'✓ Converted':'✦ Convert'}</Btn>
                     </span>
+                    <button onClick={e=>{e.stopPropagation();downloadSource(src);}} style={{ background:'none', border:'none', color:muted, cursor:'pointer', padding:2 }}><Download size={13}/></button>
                     <button onClick={e=>{e.stopPropagation();rmSource(src.id);}} style={{ background:'none', border:'none', color:muted, cursor:'pointer', padding:2 }}><X size={13}/></button>
                   </div>
                 </div>
