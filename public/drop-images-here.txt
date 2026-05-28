@@ -1,0 +1,1 @@
+Drop your 7 PWA icon images into this folder, then let Claude rename and clean up.
