@@ -4,7 +4,7 @@ import {
   BookOpen, Brain, Edit3, User, Sun, Moon,
   Trash2, Download, Upload, ChevronLeft,
   BarChart2, BookMarked, CheckCircle, Circle, Clock,
-  X, FileText, Target, Award, Key, Search, Database
+  X, FileText, Target, Award, Key, Search, Database, Info
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────
@@ -857,7 +857,17 @@ export default function RefreisherApp() {
 
         {/* Source */}
         <Box dark={dark} style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Source</div>
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+            <span style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>Source</span>
+            <span style={{ position:'relative', display:'inline-flex', alignItems:'center' }}
+              onMouseEnter={e => (e.currentTarget.querySelector('.src-tip') as HTMLElement|null)?.style && Object.assign((e.currentTarget.querySelector('.src-tip') as HTMLElement).style, { opacity:'1', pointerEvents:'auto' })}
+              onMouseLeave={e => (e.currentTarget.querySelector('.src-tip') as HTMLElement|null)?.style && Object.assign((e.currentTarget.querySelector('.src-tip') as HTMLElement).style, { opacity:'0', pointerEvents:'none' })}>
+              <Info size={12} style={{ color:muted, cursor:'default' }} />
+              <div className="src-tip" style={{ opacity:0, pointerEvents:'none', transition:'opacity 0.15s', position:'absolute', bottom:'calc(100% + 6px)', left:'50%', transform:'translateX(-50%)', width:220, background:dark?'#1e2d45':'#2A1520', color:dark?'#F8E8EC':'#FFF0F3', fontSize:11, lineHeight:1.55, padding:'8px 10px', borderRadius:'8px 2px 8px 2px', zIndex:99, boxShadow:'0 4px 16px rgba(0,0,0,0.3)' }}>
+                Best for <strong>focused, targeted study</strong> — one domain or sub-topic at a time. Keep sources concise (a single chapter, a cheat sheet, one concept area). This isn&apos;t built for broad memorization across a full textbook.
+              </div>
+            </span>
+          </div>
           <div style={{ display:'flex', gap:8, marginBottom:sel ? 10 : 0 }}>
             <select value={sourceId||''} onChange={e => setSourceId(e.target.value || undefined)}
               style={{ flex:1, background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'6px 2px 6px 2px', padding:'8px 10px', fontSize:13, outline:'none' }}>
