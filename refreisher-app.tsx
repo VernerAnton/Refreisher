@@ -592,11 +592,12 @@ export default function RefreisherApp() {
     );
 
   const convertSource = async (src: Source) => {
+    if (!apiKey) { setErr('No API key set — add your OpenRouter key in Settings first.'); return; }
     setConvertingSourceId(src.id);
     try {
       const content = await convertSourceContent(src.content);
       upd(d => ({ ...d, sources: d.sources.map(s => s.id === src.id ? { ...s, content: content.trim() } : s) }));
-    } catch { setErr('Conversion failed — please try again.'); }
+    } catch (e) { setErr(`Conversion failed: ${(e as Error).message}`); }
     finally { setConvertingSourceId(null); }
   };
 
@@ -613,7 +614,7 @@ export default function RefreisherApp() {
       setSourceId(src.id);
       setShowResearch(false);
       setResearchQuery('');
-    } catch { setErr('Research or conversion failed — please try again.'); }
+    } catch (e) { setErr(`Research failed: ${(e as Error).message}`); }
     finally { setResearching(false); setConverting(false); }
   };
 
@@ -682,7 +683,7 @@ export default function RefreisherApp() {
       const fb = parseAI(await callOpenRouter(apiKey, m, pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources)), SYS_BRAIN, true));
       setFbk(fb);
       patch(sesh.items[0].id, { userResponse: resp, aiFeedback: JSON.stringify(fb), aiScore: fb.score });
-    } catch { setErr('Evaluation failed — please try again.'); }
+    } catch (e) { setErr(`Evaluation failed: ${(e as Error).message}`); }
     finally { setBusy(false); }
   };
 
@@ -699,7 +700,7 @@ export default function RefreisherApp() {
         userResponse: resp, persona, aiFeedback: JSON.stringify(fbWithOverall), aiScore: overallScore,
         aiScores: { clarity: fb.clarityScore, accuracy: fb.accuracyScore, completeness: fb.completenessScore, overall: overallScore },
       });
-    } catch { setErr('Evaluation failed — please try again.'); }
+    } catch (e) { setErr(`Evaluation failed: ${(e as Error).message}`); }
     finally { setBusy(false); }
   };
 
@@ -746,7 +747,7 @@ export default function RefreisherApp() {
       setSesh(s); setIdx(0); setFlipped(false); setPicked(null); setAnswered(false);
       setResp(''); setFbk(null); setNotes(''); setTsecs(tlimit*60); setTon(false);
       setView('session');
-    } catch { setErr('Generation failed — please try again.'); }
+    } catch (e) { setErr(`Generation failed: ${(e as Error).message}`); }
     finally { setBusy(false); }
   };
 
@@ -773,7 +774,7 @@ export default function RefreisherApp() {
         'You are a research query optimizer. Your output is always a single improved research prompt and nothing else — no labels, no explanation, just the text of the enhanced query.',
       );
       setResearchQuery(enhanced.trim());
-    } catch { setErr('Enhance failed — check your API key.'); }
+    } catch (e) { setErr(`Enhance failed: ${(e as Error).message}`); }
     finally { setEnhancing(false); }
   };
 
