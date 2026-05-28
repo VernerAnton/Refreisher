@@ -316,6 +316,19 @@ Your entire response must be a single valid JSON object — no prose, no markdow
 OUTPUT schema (do NOT include overallScore — it is computed externally):
 {"clarityScore":80,"accuracyScore":85,"completenessScore":70,"audienceFitScore":75,"audienceFit":"...","feedback":"...","suggestions":["..."]}`;
 
+const SYS_CONVERT = `You are a knowledge-base formatter for AI study systems. You receive raw research or document content and reformat it into a structured, AI-optimised knowledge base.
+
+Rules:
+- No introduction, no conclusion, no filler phrases
+- Group information under clear ALL-CAPS section headers
+- Under each header: tight bullet points, one fact per bullet
+- Use explicit declarative sentences: "X is Y", "X controls Y", "X requires Y", "X differs from Y in that..."
+- Where two things are commonly confused, add: "A vs B: A does [X], B does [Y]"
+- Preserve all specific numbers, limits, and rules exactly as given
+- Prefix exam-critical gotchas with "GOTCHA:"
+- Prefix default behaviours with "DEFAULT:"
+- Do not add, invent, or omit any facts — only restructure what is given
+- Output only the reformatted knowledge base. No preamble or commentary.`;
 
 // ─── Prompts (user message only — role/behavior is in system prompts) ─────────
 const pFlash = (topic: string, diff: string, n: number, r: string) =>
@@ -467,6 +480,8 @@ export default function RefreisherApp() {
   // Perplexity research
   const [researching, setResearching]     = useState(false);
   const [enhancing, setEnhancing]         = useState(false);
+  const [converting, setConverting]       = useState(false);
+  const [convertingSourceId, setConvertingSourceId] = useState<string | null>(null);
   const [researchQuery, setResearchQuery] = useState('');
   const [showResearch, setShowResearch]   = useState(false);
 
@@ -569,18 +584,37 @@ export default function RefreisherApp() {
     if (previewSrcId === id) setPreviewSrcId(null);
   };
 
+  const convertSourceContent = async (raw: string): Promise<string> =>
+    callOpenRouter(
+      apiKey, evalModel,
+      `Reformat the following content into a structured AI-optimised knowledge base:\n\n${raw}`,
+      SYS_CONVERT
+    );
+
+  const convertSource = async (src: Source) => {
+    setConvertingSourceId(src.id);
+    try {
+      const content = await convertSourceContent(src.content);
+      upd(d => ({ ...d, sources: d.sources.map(s => s.id === src.id ? { ...s, content: content.trim() } : s) }));
+    } catch { setErr('Conversion failed — please try again.'); }
+    finally { setConvertingSourceId(null); }
+  };
+
   const submitResearch = async () => {
     if (!researchQuery.trim()) return;
     setResearching(true);
     try {
-      const content = await research(researchQuery);
-      const src: Source = { id: uid(), name: `${researchQuery}`, content, origin: 'perplexity', query: researchQuery, uploadedAt: ts(), _syncMeta: { synced: false } };
+      const raw = await research(researchQuery);
+      setResearching(false);
+      setConverting(true);
+      const content = await convertSourceContent(raw);
+      const src: Source = { id: uid(), name: researchQuery, content: content.trim(), origin: 'perplexity', query: researchQuery, uploadedAt: ts(), _syncMeta: { synced: false } };
       upd(d => ({ ...d, sources: [...d.sources, src] }));
       setSourceId(src.id);
       setShowResearch(false);
       setResearchQuery('');
-    } catch { setErr('Perplexity research failed — please try again.'); }
-    finally { setResearching(false); }
+    } catch { setErr('Research or conversion failed — please try again.'); }
+    finally { setResearching(false); setConverting(false); }
   };
 
   const exportAll = () => {
@@ -768,6 +802,11 @@ export default function RefreisherApp() {
         <div style={{ fontSize:13, color:C.amber, display:'flex', alignItems:'center', gap:8 }}>
           <Search size={13} style={{ animation:'spin 1s linear infinite' }} />
           Sonar Deep Research in progress… (30–120 seconds)
+        </div>
+      ) : converting ? (
+        <div style={{ fontSize:13, color:C.amber, display:'flex', alignItems:'center', gap:8 }}>
+          <Database size={13} style={{ animation:'spin 1s linear infinite' }} />
+          Structuring for AI consumption… (a few seconds)
         </div>
       ) : (
         <div style={{ display:'flex', gap:8 }}>
@@ -1332,7 +1371,15 @@ export default function RefreisherApp() {
               <Box key={src.id} dark={dark} accent={srcAccent} onClick={() => setPreviewSrcId(expanded?null:src.id)} style={{ cursor:'pointer' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 }}>
                   <div style={{ fontWeight:700, fontSize:14, flex:1, paddingRight:8 }}>{src.name}</div>
-                  <button onClick={e=>{e.stopPropagation();rmSource(src.id);}} style={{ background:'none', border:'none', color:muted, cursor:'pointer', padding:2, flexShrink:0 }}><X size={13}/></button>
+                  <div style={{ display:'flex', gap:4, alignItems:'center', flexShrink:0 }}>
+                    <span onClick={e => e.stopPropagation()}>
+                      <Btn sm variant="outline" accent={C.amber}
+                        onClick={() => convertSource(src)}
+                        disabled={!!convertingSourceId}
+                      >{convertingSourceId===src.id?'…':'✦ Convert'}</Btn>
+                    </span>
+                    <button onClick={e=>{e.stopPropagation();rmSource(src.id);}} style={{ background:'none', border:'none', color:muted, cursor:'pointer', padding:2 }}><X size={13}/></button>
+                  </div>
                 </div>
                 <div style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, flexWrap:'wrap' }}>
                   <span style={{ fontSize:10, fontWeight:700, background:`${srcAccent}20`, color:srcAccent, padding:'2px 7px', borderRadius:'3px' }}>
