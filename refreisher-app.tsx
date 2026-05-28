@@ -160,6 +160,15 @@ const parseAI = (raw: string): any => {
   return JSON.parse(s);
 };
 
+const shuffleOptions = (options: string[], correctIndex: number): { options: string[]; correctIndex: number } => {
+  const indices = [0, 1, 2, 3];
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  return { options: indices.map(i => options[i]), correctIndex: indices.indexOf(correctIndex) };
+};
+
 const ragCtx = (sourceId: string | undefined, sources: Source[]): string => {
   if (!sourceId) return '';
   const f = sources.find(x => x.id === sourceId);
@@ -662,7 +671,10 @@ export default function RefreisherApp() {
         items = (d.flashcards||[]).map((f: any) => ({ id:uid(), front:f.front, back:f.back, _syncMeta:{synced:false} }));
       } else if (mode === 'quiz') {
         const d = parseAI(await call(pQuiz(topic, diff, len, r), SYS_QUIZ));
-        items = (d.questions||[]).map((q: any) => ({ id:uid(), question:q.question, options:q.options, correctIndex:q.correctIndex, explanation:q.explanation, _syncMeta:{synced:false} }));
+        items = (d.questions||[]).map((q: any) => {
+          const shuffled = shuffleOptions(q.options, q.correctIndex);
+          return { id:uid(), question:q.question, options:shuffled.options, correctIndex:shuffled.correctIndex, explanation:q.explanation, _syncMeta:{synced:false} };
+        });
       } else {
         items = [{ id:uid(), _syncMeta:{synced:false} }];
       }
