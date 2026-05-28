@@ -182,10 +182,12 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { mon
 const wc      = (s: string) => s.split(/\s+/).filter(Boolean).length;
 
 // ─── API ──────────────────────────────────────────────────
-const callOpenRouter = async (key: string, model: string, prompt: string, system?: string): Promise<string> => {
+const callOpenRouter = async (key: string, model: string, prompt: string, system?: string, jsonMode = false): Promise<string> => {
   const messages = system
     ? [{ role: 'system', content: system }, { role: 'user', content: prompt }]
     : [{ role: 'user', content: prompt }];
+  const body: Record<string, unknown> = { model, max_tokens: 4096, messages };
+  if (jsonMode) body.response_format = { type: 'json_object' };
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -194,7 +196,7 @@ const callOpenRouter = async (key: string, model: string, prompt: string, system
       'HTTP-Referer': 'https://refreisher.vercel.app',
       'X-Title': 'Refreisher',
     },
-    body: JSON.stringify({ model, max_tokens: 4096, messages }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
@@ -242,7 +244,7 @@ When no reference document is supplied, draw on accurate domain knowledge for th
 
 QUESTION QUALITY RULES
 • Exactly 4 options per question — labelled implicitly by position (index 0–3).
-• One unambiguously correct answer. Three distinct, plausible distractors.
+• One unambiguously correct answer. Three distinct distractors — use common misconceptions, inverted relationships, or terms from the source that belong to different concepts.
 • No "all of the above" / "none of the above". No trick questions. No double negatives.
 • Explanation: state clearly why the correct answer is right AND briefly why the most tempting wrong answer is wrong.
 • Beginner: recall-level, straightforward wording.
@@ -304,8 +306,6 @@ SCORING DIMENSIONS (each 0–100)
 • Completeness (20% weight): are the core concepts covered, or are major ideas missing?
 • Audience fit (15% weight): is the language, vocabulary, and depth right for the specified audience?
 
-Compute overallScore as the weighted average of the four dimensions.
-
 FEEDBACK RULES
 • audienceFit field: one sentence assessing whether they pitched it correctly for the audience.
 • feedback: one paragraph — quote specific phrases the student used when praising or correcting.
@@ -313,8 +313,8 @@ FEEDBACK RULES
 • String values may use markdown (bold, bullet lists) where it aids clarity.
 
 Your entire response must be a single valid JSON object — no prose, no markdown fences, nothing else.
-OUTPUT schema:
-{"clarityScore":80,"accuracyScore":85,"completenessScore":70,"overallScore":78,"audienceFit":"...","feedback":"...","suggestions":["..."]}`;
+OUTPUT schema (do NOT include overallScore — it is computed externally):
+{"clarityScore":80,"accuracyScore":85,"completenessScore":70,"audienceFitScore":75,"audienceFit":"...","feedback":"...","suggestions":["..."]}`;
 
 
 // ─── Prompts (user message only — role/behavior is in system prompts) ─────────
@@ -645,7 +645,7 @@ export default function RefreisherApp() {
     setBusy(true); setTon(false);
     try {
       const m = sesh.model || evalModel;
-      const fb = parseAI(await callOpenRouter(apiKey, m, pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources)), SYS_BRAIN));
+      const fb = parseAI(await callOpenRouter(apiKey, m, pBrain(sesh.topic, resp, ragCtx(sesh.sourceId, data.sources)), SYS_BRAIN, true));
       setFbk(fb);
       patch(sesh.items[0].id, { userResponse: resp, aiFeedback: JSON.stringify(fb), aiScore: fb.score });
     } catch { setErr('Evaluation failed — please try again.'); }
@@ -657,11 +657,13 @@ export default function RefreisherApp() {
     setBusy(true);
     try {
       const m = sesh.model || evalModel;
-      const fb = parseAI(await callOpenRouter(apiKey, m, pFeynman(sesh.topic, resp, persona, ragCtx(sesh.sourceId, data.sources)), SYS_FEYNMAN));
-      setFbk(fb);
+      const fb = parseAI(await callOpenRouter(apiKey, m, pFeynman(sesh.topic, resp, persona, ragCtx(sesh.sourceId, data.sources)), SYS_FEYNMAN, true));
+      const overallScore = Math.round(0.30 * (fb.clarityScore||0) + 0.35 * (fb.accuracyScore||0) + 0.20 * (fb.completenessScore||0) + 0.15 * (fb.audienceFitScore||0));
+      const fbWithOverall = { ...fb, overallScore };
+      setFbk(fbWithOverall);
       patch(sesh.items[0].id, {
-        userResponse: resp, persona, aiFeedback: JSON.stringify(fb), aiScore: fb.overallScore,
-        aiScores: { clarity: fb.clarityScore, accuracy: fb.accuracyScore, completeness: fb.completenessScore, overall: fb.overallScore },
+        userResponse: resp, persona, aiFeedback: JSON.stringify(fbWithOverall), aiScore: overallScore,
+        aiScores: { clarity: fb.clarityScore, accuracy: fb.accuracyScore, completeness: fb.completenessScore, overall: overallScore },
       });
     } catch { setErr('Evaluation failed — please try again.'); }
     finally { setBusy(false); }
@@ -686,7 +688,7 @@ export default function RefreisherApp() {
     let did = deckId || mkDeck(topic);
     if (!deckId) setDeckId(did);
     const r = ragCtx(sourceId, data.sources);
-    const call = (prompt: string, sys: string) => callOpenRouter(apiKey, sessionModel, prompt, sys);
+    const call = (prompt: string, sys: string) => callOpenRouter(apiKey, sessionModel, prompt, sys, true);
     try {
       let items: StudyItem[] = [];
       if (mode === 'flashcards') {
