@@ -5,7 +5,7 @@ An AI-powered study app built for Salesforce Admin exam prep but designed to wor
 
 ## Repo & deployment
 - **Repo**: github.com/verneranton/refreisher
-- **Active branch**: `claude/hopeful-tesla-LJJWL` (all work goes here)
+- **Active branch**: `claude/pensive-ritchie-DakcD` (all work goes here)
 - **Vercel**: auto-deploys from the branch above
 - **Never push to main directly**
 

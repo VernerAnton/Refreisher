@@ -328,6 +328,7 @@ Rules:
 - Preserve all specific numbers, limits, and rules exactly as given
 - Prefix exam-critical gotchas with "GOTCHA:"
 - Prefix default behaviours with "DEFAULT:"
+- Strip any pre-made practice questions, worked examples, or Q&A blocks from the output. The knowledge base should contain only declarative facts, comparisons, and rules — no question stems, answer choices, or explanations in Q&A format.
 - Do not add, invent, or omit any facts — only restructure what is given
 - Output only the reformatted knowledge base. No preamble or commentary.`;
 
