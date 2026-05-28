@@ -47,6 +47,7 @@ interface Source {
   id: string; name: string; content: string;
   origin: 'upload' | 'perplexity';
   query?: string;
+  converted?: boolean;
   uploadedAt: string;
   _syncMeta?: { synced: boolean };
 }
@@ -95,20 +96,20 @@ const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.Rea
 };
 
 const GENERATION_MODELS = [
-  { id: 'anthropic/claude-haiku-latest',  name: 'Claude Haiku',  note: 'fast · always latest' },
-  { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet', note: 'balanced · always latest' },
+  { id: 'anthropic/claude-haiku-4-5-20251001', name: 'Claude Haiku',  note: 'fast' },
+  { id: 'anthropic/claude-sonnet-4-6',         name: 'Claude Sonnet', note: 'balanced' },
 ];
 
 const EVALUATION_MODELS = [
-  { id: 'anthropic/claude-haiku-latest',  name: 'Claude Haiku',  note: 'fast · always latest' },
-  { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet', note: 'balanced · always latest' },
+  { id: 'anthropic/claude-haiku-4-5-20251001', name: 'Claude Haiku',  note: 'fast' },
+  { id: 'anthropic/claude-sonnet-4-6',         name: 'Claude Sonnet', note: 'balanced' },
 ];
 
 const RESEARCH_MODEL = 'perplexity/sonar-deep-research';
 
 const ALL_MODELS = [
-  { id: 'anthropic/claude-haiku-latest',  name: 'Claude Haiku',  note: 'fast · always latest' },
-  { id: 'anthropic/claude-sonnet-latest', name: 'Claude Sonnet', note: 'balanced · always latest' },
+  { id: 'anthropic/claude-haiku-4-5-20251001', name: 'Claude Haiku',  note: 'fast' },
+  { id: 'anthropic/claude-sonnet-4-6',         name: 'Claude Sonnet', note: 'balanced' },
 ];
 
 const C = {
@@ -461,8 +462,14 @@ export default function RefreisherApp() {
   const [apiKey, setApiKey]     = useState(() => localStorage.getItem('openrouter_api_key') || '');
   const [keyInput, setKeyInput] = useState('');
   const [showKey, setShowKey]   = useState(() => !localStorage.getItem('openrouter_api_key'));
-  const [genModel, setGenModel] = useState(() => localStorage.getItem('gen_model') || 'anthropic/claude-haiku-latest');
-  const [evalModel, setEvalModel] = useState(() => localStorage.getItem('eval_model') || 'anthropic/claude-sonnet-latest');
+  const [genModel, setGenModel] = useState(() => {
+    const v = localStorage.getItem('gen_model');
+    return (v && !v.endsWith('-latest')) ? v : 'anthropic/claude-haiku-4-5-20251001';
+  });
+  const [evalModel, setEvalModel] = useState(() => {
+    const v = localStorage.getItem('eval_model');
+    return (v && !v.endsWith('-latest')) ? v : 'anthropic/claude-sonnet-4-6';
+  });
 
   // Setup
   const [topic, setTopic]       = useState('');
@@ -596,7 +603,7 @@ export default function RefreisherApp() {
     setConvertingSourceId(src.id);
     try {
       const content = await convertSourceContent(src.content);
-      upd(d => ({ ...d, sources: d.sources.map(s => s.id === src.id ? { ...s, content: content.trim() } : s) }));
+      upd(d => ({ ...d, sources: d.sources.map(s => s.id === src.id ? { ...s, content: content.trim(), converted: true } : s) }));
     } catch (e) { setErr(`Conversion failed: ${(e as Error).message}`); }
     finally { setConvertingSourceId(null); }
   };
@@ -609,7 +616,7 @@ export default function RefreisherApp() {
       setResearching(false);
       setConverting(true);
       const content = await convertSourceContent(raw);
-      const src: Source = { id: uid(), name: researchQuery, content: content.trim(), origin: 'perplexity', query: researchQuery, uploadedAt: ts(), _syncMeta: { synced: false } };
+      const src: Source = { id: uid(), name: researchQuery, content: content.trim(), origin: 'perplexity', query: researchQuery, converted: true, uploadedAt: ts(), _syncMeta: { synced: false } };
       upd(d => ({ ...d, sources: [...d.sources, src] }));
       setSourceId(src.id);
       setShowResearch(false);
@@ -769,7 +776,7 @@ export default function RefreisherApp() {
     try {
       const enhanced = await callOpenRouter(
         apiKey,
-        'anthropic/claude-sonnet-latest',
+        evalModel,
         `Rewrite this brief research topic into a comprehensive, detailed research prompt that will produce thorough, well-structured results from a deep-research search engine. Expand it to specify relevant subtopics, depth of detail, and any important distinctions or nuances to cover. Return only the improved prompt — no explanation, no preamble.\n\nTopic: ${researchQuery}`,
         'You are a research query optimizer. Your output is always a single improved research prompt and nothing else — no labels, no explanation, just the text of the enhanced query.',
       );
@@ -1374,10 +1381,10 @@ export default function RefreisherApp() {
                   <div style={{ fontWeight:700, fontSize:14, flex:1, paddingRight:8 }}>{src.name}</div>
                   <div style={{ display:'flex', gap:4, alignItems:'center', flexShrink:0 }}>
                     <span onClick={e => e.stopPropagation()}>
-                      <Btn sm variant="outline" accent={C.amber}
+                      <Btn sm variant={src.converted?'primary':'outline'} accent={C.amber}
                         onClick={() => convertSource(src)}
                         disabled={!!convertingSourceId}
-                      >{convertingSourceId===src.id?'…':'✦ Convert'}</Btn>
+                      >{convertingSourceId===src.id?'…':src.converted?'✓ Converted':'✦ Convert'}</Btn>
                     </span>
                     <button onClick={e=>{e.stopPropagation();rmSource(src.id);}} style={{ background:'none', border:'none', color:muted, cursor:'pointer', padding:2 }}><X size={13}/></button>
                   </div>
