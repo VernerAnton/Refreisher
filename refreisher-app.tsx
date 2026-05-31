@@ -68,30 +68,34 @@ const PERSONAS = [
   { id: 'professor',name: 'Domain expert',      description: 'Precise terminology, full depth' },
 ];
 
-const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.ReactNode; description: string; tier: 'gen' | 'eval'; modelHint: string }> = {
+const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.ReactNode; description: string; tier: 'gen' | 'eval'; modelLabel: string; modelHint: string }> = {
   flashcards: {
     label: 'Flashcards', accent: '#FF6B89', icon: <BookOpen size={20} />,
     description: 'Flip cards to test recall',
     tier: 'gen',
-    modelHint: 'Reads your source and writes each card\'s question and answer. Sonnet makes sharper, more exam-relevant cards. Haiku is faster and cheaper — fine if your source is already well-structured.',
+    modelLabel: 'Flashcard Writer',
+    modelHint: 'This model reads your source and creates every card — both the question side and the answer. It needs to understand context, pick out what actually matters, and phrase things clearly. This is a content creation task; a more capable model produces meaningfully sharper, more exam-relevant cards.',
   },
   quiz: {
     label: 'Quiz', accent: '#FF002C', icon: <Brain size={20} />,
     description: 'Multiple-choice with immediate feedback',
     tier: 'gen',
-    modelHint: 'Writes the question and all four answer choices, including the wrong ones. The wrong answers are the hard part — Sonnet produces much more realistic distractors that actually test your knowledge.',
+    modelLabel: 'Question Designer',
+    modelHint: 'This model writes the question and designs all four answer choices — including the wrong ones. Getting the distractors right is the hard part: they need to be plausible, based on real misconceptions, and actually test whether you know the material. A more capable model makes a real difference here.',
   },
   brain_dump: {
     label: 'Brain Dump', accent: '#C97B9E', icon: <Edit3 size={20} />,
     description: 'Timed free recall — write everything you know',
     tier: 'eval',
-    modelHint: 'Reads everything you wrote and scores it against the source. A stronger model gives more specific, genuinely useful feedback rather than generic praise.',
+    modelLabel: 'Response Evaluator',
+    modelHint: 'This model reads everything you wrote, compares it against your source, and scores how much you actually recalled. It identifies what was right, what was missing, and what to review next. More capable models give specific, targeted feedback rather than vague encouragement.',
   },
   feynman: {
     label: 'Feynman', accent: '#FF8C69', icon: <User size={20} />,
     description: 'Explain the concept to an audience',
     tier: 'eval',
-    modelHint: 'Judges your explanation on clarity, accuracy, completeness, and audience fit — then suggests concrete rewrites. The most demanding mode; Sonnet is the right call here.',
+    modelLabel: 'Explanation Judge',
+    modelHint: 'This model acts as your audience — judging whether your explanation is clear, accurate, complete, and pitched at the right level, then suggesting concrete rewrites. This is the most demanding task in the app. A more capable model gives meaningfully better coaching.',
   },
 };
 
@@ -971,8 +975,17 @@ export default function RefreisherApp() {
 
         {/* Model — per session */}
         <Box dark={dark} style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Model</div>
-          <div style={{ fontSize:12, color:muted, marginBottom:10, lineHeight:1.5 }}>{cfg.modelHint}</div>
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+            <span style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>{cfg.modelLabel}</span>
+            <span style={{ position:'relative', display:'inline-flex', alignItems:'center' }}
+              onMouseEnter={e => { const t = e.currentTarget.querySelector('.ml-tip') as HTMLElement|null; if (t) { t.style.opacity='1'; t.style.pointerEvents='auto'; } }}
+              onMouseLeave={e => { const t = e.currentTarget.querySelector('.ml-tip') as HTMLElement|null; if (t) { t.style.opacity='0'; t.style.pointerEvents='none'; } }}>
+              <Info size={12} style={{ color:muted, cursor:'default' }} />
+              <div className="ml-tip" style={{ opacity:0, pointerEvents:'none', transition:'opacity 0.15s', position:'absolute', bottom:'calc(100% + 6px)', left:'50%', transform:'translateX(-50%)', width:240, background:dark?'#1e2d45':'#2A1520', color:dark?'#F8E8EC':'#FFF0F3', fontSize:11, lineHeight:1.6, padding:'9px 11px', borderRadius:'8px 2px 8px 2px', zIndex:99, boxShadow:'0 4px 16px rgba(0,0,0,0.3)' }}>
+                {cfg.modelHint}
+              </div>
+            </span>
+          </div>
           <select value={sessionModel} onChange={e => setSessionModel(e.target.value)}
             style={{ width:'100%', background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'8px 2px 8px 2px', padding:'8px 12px', fontSize:13, outline:'none' }}>
             {ALL_MODELS.map(m => (
@@ -1045,9 +1058,16 @@ export default function RefreisherApp() {
 
         {/* Default model — saves for future sessions */}
         <Box dark={dark} style={{ marginBottom:16 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Your Default</div>
-          <div style={{ fontSize:12, color:muted, marginBottom:10, lineHeight:1.5 }}>
-            Saved preference for future sessions — this pre-fills the model picker above next time. Doesn&apos;t affect the current session.
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+            <span style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>Your Default</span>
+            <span style={{ position:'relative', display:'inline-flex', alignItems:'center' }}
+              onMouseEnter={e => { const t = e.currentTarget.querySelector('.md-tip') as HTMLElement|null; if (t) { t.style.opacity='1'; t.style.pointerEvents='auto'; } }}
+              onMouseLeave={e => { const t = e.currentTarget.querySelector('.md-tip') as HTMLElement|null; if (t) { t.style.opacity='0'; t.style.pointerEvents='none'; } }}>
+              <Info size={12} style={{ color:muted, cursor:'default' }} />
+              <div className="md-tip" style={{ opacity:0, pointerEvents:'none', transition:'opacity 0.15s', position:'absolute', bottom:'calc(100% + 6px)', left:'50%', transform:'translateX(-50%)', width:240, background:dark?'#1e2d45':'#2A1520', color:dark?'#F8E8EC':'#FFF0F3', fontSize:11, lineHeight:1.6, padding:'9px 11px', borderRadius:'8px 2px 8px 2px', zIndex:99, boxShadow:'0 4px 16px rgba(0,0,0,0.3)' }}>
+                Your saved preference for this type of session. It pre-fills the model picker above the next time you open Setup — so you don&apos;t have to choose every time. Changing it here doesn&apos;t affect the current session.
+              </div>
+            </span>
           </div>
           <select value={cfg.tier === 'gen' ? genModel : evalModel}
             onChange={e => cfg.tier === 'gen' ? updateGenModel(e.target.value) : updateEvalModel(e.target.value)}
