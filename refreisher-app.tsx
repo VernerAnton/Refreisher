@@ -182,6 +182,15 @@ const ragCtx = (sourceId: string | undefined, sources: Source[]): string => {
   return `\n\nReference document:\n---\n${f.content}\n---`;
 };
 
+const exclusionCtx = (sessionIds: string[], sessions: Session[]): string => {
+  if (!sessionIds.length) return '';
+  const fronts = sessions
+    .filter(s => sessionIds.includes(s.id))
+    .flatMap(s => s.items.map(i => i.front || i.question).filter(Boolean) as string[]);
+  if (!fronts.length) return '';
+  return `\n\nAlready covered — do NOT generate questions or cards about domains or concepts already addressed by the following. Focus only on what is NOT yet covered:\n${fronts.map(f => `- ${f}`).join('\n')}`;
+};
+
 const fmt     = (s: number) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
 const wc      = (s: string) => s.split(/\s+/).filter(Boolean).length;
@@ -337,11 +346,11 @@ Rules:
 - Output only the reformatted knowledge base. No preamble or commentary.`;
 
 // ─── Prompts (user message only — role/behavior is in system prompts) ─────────
-const pFlash = (topic: string, diff: string, n: number, r: string) =>
-  `Topic: "${topic}"\nDifficulty: ${diff}\nCard count: ${n}${r}`;
+const pFlash = (topic: string, diff: string, n: number, r: string, excl = '') =>
+  `Topic: "${topic}"\nDifficulty: ${diff}\nCard count: ${n}${r}${excl}`;
 
-const pQuiz = (topic: string, diff: string, n: number, r: string) =>
-  `Topic: "${topic}"\nDifficulty: ${diff}\nQuestion count: ${n}${r}`;
+const pQuiz = (topic: string, diff: string, n: number, r: string, excl = '') =>
+  `Topic: "${topic}"\nDifficulty: ${diff}\nQuestion count: ${n}${r}${excl}`;
 
 const pBrain = (topic: string, resp: string, r: string) =>
   `Topic: "${topic}"${r}\n\nStudent's brain dump:\n${resp}`;
@@ -488,6 +497,7 @@ export default function RefreisherApp() {
   const [tlimit, setTlimit]     = useState(5);
   const [showND, setShowND]     = useState(false);
   const [ndName, setNdName]     = useState('');
+  const [excludeSessionIds, setExcludeSessionIds] = useState<string[]>([]);
 
   // Perplexity research
   const [researching, setResearching]     = useState(false);
@@ -752,14 +762,15 @@ export default function RefreisherApp() {
     let did = deckId || mkDeck(topic);
     if (!deckId) setDeckId(did);
     const r = ragCtx(sourceId, data.sources);
+    const excl = exclusionCtx(excludeSessionIds, data.sessions);
     const call = (prompt: string, sys: string) => callOpenRouter(apiKey, sessionModel, prompt, sys, true);
     try {
       let items: StudyItem[] = [];
       if (mode === 'flashcards') {
-        const d = parseAI(await call(pFlash(topic, diff, len, r), SYS_FLASH));
+        const d = parseAI(await call(pFlash(topic, diff, len, r, excl), SYS_FLASH));
         items = (d.flashcards||[]).map((f: any) => ({ id:uid(), front:f.front, back:f.back, _syncMeta:{synced:false} }));
       } else if (mode === 'quiz') {
-        const d = parseAI(await call(pQuiz(topic, diff, len, r), SYS_QUIZ));
+        const d = parseAI(await call(pQuiz(topic, diff, len, r, excl), SYS_QUIZ));
         items = (d.questions||[]).map((q: any) => {
           const shuffled = shuffleOptions(q.options, q.correctIndex);
           return { id:uid(), question:q.question, options:shuffled.options, correctIndex:shuffled.correctIndex, explanation:q.explanation, _syncMeta:{synced:false} };
@@ -897,7 +908,7 @@ export default function RefreisherApp() {
           return (
             <Box key={m} dark={dark} accent={can ? cfg.accent : undefined}
               style={{ cursor:can?'pointer':'not-allowed', opacity:can?1:0.45, transition:'opacity 0.15s' }}
-              onClick={() => { if (!can) return; setMode(m); setSessionModel(evalModel); setView('setup'); setErr(null); setShowResearch(false); }}>
+              onClick={() => { if (!can) return; setMode(m); setSessionModel(evalModel); setExcludeSessionIds([]); setView('setup'); setErr(null); setShowResearch(false); }}>
               <div style={{ color:cfg.accent, marginBottom:8 }}>{cfg.icon}</div>
               <div style={{ fontWeight:700, fontSize:15, marginBottom:3 }}>{cfg.label}</div>
               <div style={{ fontSize:12, color:muted }}>{cfg.description}</div>
@@ -926,52 +937,92 @@ export default function RefreisherApp() {
           <div style={{ fontSize:13, color:muted }}>{topic}</div>
         </Box>
 
-        {/* Source */}
-        <Box dark={dark} style={{ marginBottom:12 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
-            <span style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>Source</span>
-            <span style={{ position:'relative', display:'inline-flex', alignItems:'center' }}
-              onMouseEnter={e => (e.currentTarget.querySelector('.src-tip') as HTMLElement|null)?.style && Object.assign((e.currentTarget.querySelector('.src-tip') as HTMLElement).style, { opacity:'1', pointerEvents:'auto' })}
-              onMouseLeave={e => (e.currentTarget.querySelector('.src-tip') as HTMLElement|null)?.style && Object.assign((e.currentTarget.querySelector('.src-tip') as HTMLElement).style, { opacity:'0', pointerEvents:'none' })}>
-              <Info size={12} style={{ color:muted, cursor:'default' }} />
-              <div className="src-tip" style={{ opacity:0, pointerEvents:'none', transition:'opacity 0.15s', position:'absolute', bottom:'calc(100% + 6px)', left:'50%', transform:'translateX(-50%)', width:220, background:dark?'#1e2d45':'#2A1520', color:dark?'#F8E8EC':'#FFF0F3', fontSize:11, lineHeight:1.55, padding:'8px 10px', borderRadius:'8px 2px 8px 2px', zIndex:99, boxShadow:'0 4px 16px rgba(0,0,0,0.3)' }}>
-                Best for <strong>focused, targeted study</strong> — one domain or sub-topic at a time. Keep sources concise (a single chapter, a cheat sheet, one concept area). This isn&apos;t built for broad memorization across a full textbook.
-              </div>
-            </span>
-          </div>
-          <div style={{ display:'flex', gap:8, marginBottom:sel ? 10 : 0 }}>
-            <select value={sourceId||''} onChange={e => setSourceId(e.target.value || undefined)}
-              style={{ flex:1, background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'6px 2px 6px 2px', padding:'8px 10px', fontSize:13, outline:'none' }}>
-              <option value="">Select a source…</option>
-              {data.sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <Btn sm variant="outline" accent={cfg.accent} onClick={() => fileRef.current?.click()}>Upload</Btn>
-            <input ref={fileRef} type="file" accept=".txt,.md,text/plain,text/markdown" style={{ display:'none' }} onChange={uploadFile} />
-          </div>
-          {sel && (
-            <div style={{ padding:'9px 12px', background:`${cfg.accent}10`, borderRadius:'6px 2px 6px 2px', marginBottom:10 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
-                <span style={{ fontWeight:700, fontSize:13 }}>{sel.name}</span>
-                <span style={{ fontSize:10, fontWeight:700, background:sel.origin==='perplexity'?`${C.amber}20`:`${C.accent}20`, color:sel.origin==='perplexity'?C.amber:C.accent, padding:'2px 6px', borderRadius:'3px' }}>
-                  {sel.origin==='perplexity' ? 'Perplexity' : 'Upload'}
-                </span>
-                <span style={{ fontSize:11, color:muted }}>{wc(sel.content).toLocaleString()} words</span>
-              </div>
-              <div style={{ fontSize:12, color:muted, lineHeight:1.5 }}>{sel.content.slice(0,150)}{sel.content.length>150?'…':''}</div>
+        {/* Source + Exclusion — side by side */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+
+          {/* Left: Source */}
+          <Box dark={dark} style={{ marginBottom:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+              <span style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>Source</span>
+              <span style={{ position:'relative', display:'inline-flex', alignItems:'center' }}
+                onMouseEnter={e => (e.currentTarget.querySelector('.src-tip') as HTMLElement|null)?.style && Object.assign((e.currentTarget.querySelector('.src-tip') as HTMLElement).style, { opacity:'1', pointerEvents:'auto' })}
+                onMouseLeave={e => (e.currentTarget.querySelector('.src-tip') as HTMLElement|null)?.style && Object.assign((e.currentTarget.querySelector('.src-tip') as HTMLElement).style, { opacity:'0', pointerEvents:'none' })}>
+                <Info size={12} style={{ color:muted, cursor:'default' }} />
+                <div className="src-tip" style={{ opacity:0, pointerEvents:'none', transition:'opacity 0.15s', position:'absolute', bottom:'calc(100% + 6px)', left:'50%', transform:'translateX(-50%)', width:220, background:dark?'#1e2d45':'#2A1520', color:dark?'#F8E8EC':'#FFF0F3', fontSize:11, lineHeight:1.55, padding:'8px 10px', borderRadius:'8px 2px 8px 2px', zIndex:99, boxShadow:'0 4px 16px rgba(0,0,0,0.3)' }}>
+                  Best for <strong>focused, targeted study</strong> — one domain or sub-topic at a time. Keep sources concise (a single chapter, a cheat sheet, one concept area). This isn&apos;t built for broad memorization across a full textbook.
+                </div>
+              </span>
             </div>
-          )}
-          {!showResearch ? (
-            <button onClick={() => { setResearchQuery(topic); setShowResearch(true); }}
-              style={{ transform:'skewX(-6deg)', background:'transparent', border:`1px solid ${C.amber}`, color:C.amber, padding:'6px 14px', borderRadius:'2px 7px 2px 7px', cursor:'pointer', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
-              <span style={{ display:'flex', transform:'skewX(6deg)', alignItems:'center', gap:6 }}><Search size={12}/> Research with Perplexity</span>
-            </button>
-          ) : (
-            <ResearchForm accentColor={cfg.accent} />
-          )}
-          {data.sources.length === 0 && !showResearch && (
-            <div style={{ fontSize:11, color:muted, marginTop:8 }}>No sources yet — upload a file or research with Perplexity</div>
-          )}
-        </Box>
+            <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+              <select value={sourceId||''} onChange={e => setSourceId(e.target.value || undefined)}
+                style={{ flex:1, background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'6px 2px 6px 2px', padding:'8px 10px', fontSize:13, outline:'none' }}>
+                <option value="">Select a source…</option>
+                {data.sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <Btn sm variant="outline" accent={cfg.accent} onClick={() => fileRef.current?.click()}>Upload</Btn>
+              <input ref={fileRef} type="file" accept=".txt,.md,text/plain,text/markdown" style={{ display:'none' }} onChange={uploadFile} />
+            </div>
+            {!showResearch && (
+              <button onClick={() => { setResearchQuery(topic); setShowResearch(true); }}
+                style={{ transform:'skewX(-6deg)', background:'transparent', border:`1px solid ${C.amber}`, color:C.amber, padding:'6px 14px', borderRadius:'2px 7px 2px 7px', cursor:'pointer', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{ display:'flex', transform:'skewX(6deg)', alignItems:'center', gap:6 }}><Search size={12}/> Research with Perplexity</span>
+              </button>
+            )}
+            {data.sources.length === 0 && !showResearch && (
+              <div style={{ fontSize:11, color:muted, marginTop:8 }}>No sources yet — upload a file or research with Perplexity</div>
+            )}
+          </Box>
+
+          {/* Right: Exclude Domains From */}
+          <Box dark={dark} style={{ marginBottom:0 }}>
+            <div style={{ marginBottom:8 }}>
+              <span style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>Exclude Domains From</span>
+              <div style={{ fontSize:11, color:muted, marginTop:3, fontStyle:'italic' }}>Optional — skip domains already covered in these sessions</div>
+            </div>
+            {data.sessions.filter(s => s.items.length > 0).length === 0 ? (
+              <div style={{ fontSize:11, color:muted }}>No sessions yet — complete a session first to use exclusions</div>
+            ) : (
+              <div style={{ maxHeight:120, overflowY:'auto', display:'flex', flexDirection:'column', gap:3 }}>
+                {[...data.sessions].filter(s => s.items.length > 0).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).map(s => {
+                  const checked = excludeSessionIds.includes(s.id);
+                  const mc = MODE_CONFIG[s.mode];
+                  return (
+                    <label key={s.id} style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer', padding:'3px 2px', borderRadius:4 }}>
+                      <input type="checkbox" checked={checked}
+                        onChange={() => setExcludeSessionIds(prev => checked ? prev.filter(x => x !== s.id) : [...prev, s.id])}
+                        style={{ accentColor: cfg.accent, cursor:'pointer', flexShrink:0 }}
+                      />
+                      <span style={{ fontSize:11, color:fg, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.topic}</span>
+                      <span style={{ fontSize:10, color:mc.accent, fontWeight:700, flexShrink:0 }}>{mc.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {excludeSessionIds.length > 0 && (
+              <div style={{ fontSize:11, color:cfg.accent, marginTop:6, fontWeight:600 }}>
+                {excludeSessionIds.length} session{excludeSessionIds.length > 1 ? 's' : ''} excluded
+              </div>
+            )}
+          </Box>
+        </div>
+
+        {/* Selected source preview — full width */}
+        {sel && (
+          <Box dark={dark} style={{ marginBottom:12 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
+              <span style={{ fontWeight:700, fontSize:13 }}>{sel.name}</span>
+              <span style={{ fontSize:10, fontWeight:700, background:sel.origin==='perplexity'?`${C.amber}20`:`${C.accent}20`, color:sel.origin==='perplexity'?C.amber:C.accent, padding:'2px 6px', borderRadius:'3px' }}>
+                {sel.origin==='perplexity' ? 'Perplexity' : 'Upload'}
+              </span>
+              <span style={{ fontSize:11, color:muted }}>{wc(sel.content).toLocaleString()} words</span>
+            </div>
+            <div style={{ fontSize:12, color:muted, lineHeight:1.5 }}>{sel.content.slice(0,150)}{sel.content.length>150?'…':''}</div>
+          </Box>
+        )}
+
+        {/* Research form — full width */}
+        {showResearch && <div style={{ marginBottom:12 }}><ResearchForm accentColor={cfg.accent} /></div>}
 
         {/* Model — per session */}
         <Box dark={dark} style={{ marginBottom:12 }}>
