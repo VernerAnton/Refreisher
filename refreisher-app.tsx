@@ -1059,7 +1059,7 @@ export default function RefreisherApp() {
         {/* Default model — saves for future sessions */}
         <Box dark={dark} style={{ marginBottom:16 }}>
           <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
-            <span style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>Your Default</span>
+            <span style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>{cfg.tier === 'gen' ? 'Output Formatter' : 'Feedback Formatter'}</span>
             <span style={{ position:'relative', display:'inline-flex', alignItems:'center' }}
               onMouseEnter={e => { const t = e.currentTarget.querySelector('.md-tip') as HTMLElement|null; if (t) { t.style.opacity='1'; t.style.pointerEvents='auto'; } }}
               onMouseLeave={e => { const t = e.currentTarget.querySelector('.md-tip') as HTMLElement|null; if (t) { t.style.opacity='0'; t.style.pointerEvents='none'; } }}>
