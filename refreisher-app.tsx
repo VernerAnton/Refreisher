@@ -73,25 +73,25 @@ const MODE_CONFIG: Record<Mode, { label: string; accent: string; icon: React.Rea
     label: 'Flashcards', accent: '#FF6B89', icon: <BookOpen size={20} />,
     description: 'Flip cards to test recall',
     tier: 'gen',
-    modelHint: 'Pure JSON generation — any fast model handles this perfectly. Best place to save cost.',
+    modelHint: 'Reads your source and writes each card\'s question and answer. Sonnet makes sharper, more exam-relevant cards. Haiku is faster and cheaper — fine if your source is already well-structured.',
   },
   quiz: {
     label: 'Quiz', accent: '#FF002C', icon: <Brain size={20} />,
     description: 'Multiple-choice with immediate feedback',
     tier: 'gen',
-    modelHint: 'Needs coherent distractors — a mid-tier model reduces nonsensical wrong answers.',
+    modelHint: 'Writes the question and all four answer choices, including the wrong ones. The wrong answers are the hard part — Sonnet produces much more realistic distractors that actually test your knowledge.',
   },
   brain_dump: {
     label: 'Brain Dump', accent: '#C97B9E', icon: <Edit3 size={20} />,
     description: 'Timed free recall — write everything you know',
     tier: 'eval',
-    modelHint: 'Has to read your response against the source and score it honestly. A stronger model gives meaningfully better feedback.',
+    modelHint: 'Reads everything you wrote and scores it against the source. A stronger model gives more specific, genuinely useful feedback rather than generic praise.',
   },
   feynman: {
     label: 'Feynman', accent: '#FF8C69', icon: <User size={20} />,
     description: 'Explain the concept to an audience',
     tier: 'eval',
-    modelHint: 'Most demanding — judges clarity, accuracy, and audience fit, then suggests concrete rewrites. Worth upgrading here.',
+    modelHint: 'Judges your explanation on clarity, accuracy, completeness, and audience fit — then suggests concrete rewrites. The most demanding mode; Sonnet is the right call here.',
   },
 };
 
@@ -893,7 +893,7 @@ export default function RefreisherApp() {
           return (
             <Box key={m} dark={dark} accent={can ? cfg.accent : undefined}
               style={{ cursor:can?'pointer':'not-allowed', opacity:can?1:0.45, transition:'opacity 0.15s' }}
-              onClick={() => { if (!can) return; setMode(m); setSessionModel(MODE_CONFIG[m].tier === 'gen' ? genModel : evalModel); setView('setup'); setErr(null); setShowResearch(false); }}>
+              onClick={() => { if (!can) return; setMode(m); setSessionModel(evalModel); setView('setup'); setErr(null); setShowResearch(false); }}>
               <div style={{ color:cfg.accent, marginBottom:8 }}>{cfg.icon}</div>
               <div style={{ fontWeight:700, fontSize:15, marginBottom:3 }}>{cfg.label}</div>
               <div style={{ fontSize:12, color:muted }}>{cfg.description}</div>
@@ -969,6 +969,18 @@ export default function RefreisherApp() {
           )}
         </Box>
 
+        {/* Model — per session */}
+        <Box dark={dark} style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Model</div>
+          <div style={{ fontSize:12, color:muted, marginBottom:10, lineHeight:1.5 }}>{cfg.modelHint}</div>
+          <select value={sessionModel} onChange={e => setSessionModel(e.target.value)}
+            style={{ width:'100%', background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'8px 2px 8px 2px', padding:'8px 12px', fontSize:13, outline:'none' }}>
+            {ALL_MODELS.map(m => (
+              <option key={m.id} value={m.id}>{m.name} — {m.note}</option>
+            ))}
+          </select>
+        </Box>
+
         {/* Difficulty */}
         <Box dark={dark} style={{ marginBottom:12 }}>
           <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>Difficulty</div>
@@ -1031,11 +1043,14 @@ export default function RefreisherApp() {
           </Box>
         )}
 
-        {/* Model */}
+        {/* Default model — saves for future sessions */}
         <Box dark={dark} style={{ marginBottom:16 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Model</div>
-          <div style={{ fontSize:12, color:muted, marginBottom:10, lineHeight:1.5 }}>{cfg.modelHint}</div>
-          <select value={sessionModel} onChange={e => setSessionModel(e.target.value)}
+          <div style={{ fontSize:11, fontWeight:700, color:muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>Your Default</div>
+          <div style={{ fontSize:12, color:muted, marginBottom:10, lineHeight:1.5 }}>
+            Saved preference for future sessions — this pre-fills the model picker above next time. Doesn&apos;t affect the current session.
+          </div>
+          <select value={cfg.tier === 'gen' ? genModel : evalModel}
+            onChange={e => cfg.tier === 'gen' ? updateGenModel(e.target.value) : updateEvalModel(e.target.value)}
             style={{ width:'100%', background:cardBg, border:`1px solid ${bdr}`, color:fg, borderRadius:'8px 2px 8px 2px', padding:'8px 12px', fontSize:13, outline:'none' }}>
             {ALL_MODELS.map(m => (
               <option key={m.id} value={m.id}>{m.name} — {m.note}</option>
